@@ -1,0 +1,24 @@
+name: Verify editor
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg xvfb libnss3 libgbm1 libasound2t64
+      - run: npm ci
+      - run: npm run fixtures
+      - run: npm run build
+      - run: npm test
+      - run: xvfb-run -a npm run test:gui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-gui-evidence
+          path: |
+            docs/live-acceptance.json
+            docs/screenshot.png

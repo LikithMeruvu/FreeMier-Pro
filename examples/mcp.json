@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "freemier-pro": {
+      "command": "node",
+      "args": ["/absolute/path/FreeMier-Pro/packages/mcp/dist/cli.js"],
+      "env": {
+        "FREEMIER_WORKSPACE": "/absolute/path/FreeMier-workspace",
+        "FREEMIER_BRIDGE_PORT": "4317"
+      }
+    }
+  }
+}

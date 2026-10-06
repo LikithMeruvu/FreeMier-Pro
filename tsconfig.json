@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/shared"
+    },
+    {
+      "path": "packages/engine"
+    },
+    {
+      "path": "packages/ffmpeg"
+    },
+    {
+      "path": "packages/mcp"
+    }
+  ]
+}

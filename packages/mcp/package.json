@@ -1,0 +1,22 @@
+{
+  "name": "@freemier/mcp",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "freemier-pro": "./dist/cli.js",
+    "palmier": "./dist/media-cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@freemier/engine": "*",
+    "@freemier/ffmpeg": "*",
+    "@freemier/shared": "*",
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.25.2"
+  }
+}

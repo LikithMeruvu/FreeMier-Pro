@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; media-src 'self' file: data: blob: http://127.0.0.1:*; img-src 'self' file: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<title>FreeMier Pro</title>
+<link rel="stylesheet" href="./app.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">FreeMier<span class="dot">●</span></div>
+    <div id="project-name" class="project-name">Untitled Project</div>
+    <div class="spacer"></div>
+    <div id="live-status" class="live-status" title="Live sync from agent edits">
+      <span class="pulse"></span><span id="live-text">connecting…</span>
+    </div>
+    <button id="btn-import" class="btn">Import media</button>
+    <button id="btn-export" class="btn primary">Export</button>
+  </header>
+
+  <main id="layout">
+    <aside id="left" class="panel">
+      <div class="panel-head">Media</div>
+      <div id="media-bin" class="media-bin">
+        <div class="empty">No media yet — import a file or let the agent add one.</div>
+      </div>
+    </aside>
+
+    <section id="center">
+      <div id="preview-wrap">
+        <div id="preview-stage">
+          <div id="preview-empty" class="preview-empty">Preview</div>
+        </div>
+        <div id="transport">
+          <button id="btn-play" class="btn icon">▶</button>
+          <input id="scrub" type="range" min="0" max="1000" value="0" />
+          <div id="timecode" class="timecode">00:00.00 / 00:00.00</div>
+        </div>
+      </div>
+
+      <div id="timeline-wrap">
+        <div id="timeline-head">
+          <span class="panel-title">Timeline</span>
+          <span id="revision" class="revision">rev 0</span>
+        </div>
+        <canvas id="timeline"></canvas>
+      </div>
+    </section>
+
+    <aside id="right" class="panel">
+      <div class="panel-head">Inspector</div>
+      <div id="inspector" class="inspector">
+        <div class="empty">Select a clip to edit it.</div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "name": "freemier-pro",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Cross-platform, MCP-native video editor \u2014 agents edit video, you watch it live",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b && npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty",
+    "mcp": "node packages/mcp/dist/cli.js",
+    "gui": "npm run start -w @freemier/gui",
+    "test:gui": "node packages/gui/test/live-sync.mjs",
+    "screenshot": "node packages/gui/test/screenshot.mjs",
+    "fixtures": "node scripts/generate-fixtures.mjs",
+    "media:inspect": "node packages/mcp/dist/media-cli.js media inspect"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^44.5.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "esbuild@0.28.2": true,
+    "electron@44.5.1": true
+  }
+}
