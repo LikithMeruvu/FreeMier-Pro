@@ -24,9 +24,10 @@
   </div>
   <main id="layout">
     <aside id="left" class="panel">
-      <div class="panel-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><span class="spacer"></span><button id="btn-import" title="Import media">＋</button></div>
+      <div class="panel-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><button data-browser="markers">Markers</button><span class="spacer"></span><button id="btn-import" title="Import media">＋</button></div>
       <div class="search-row"><input id="bin-search" type="search" placeholder="Search media" aria-label="Search media" /><button id="bin-view" title="Toggle list/grid view">▦</button></div>
       <div id="media-bin" class="media-bin grid"></div><div id="effects-browser" class="effects-browser" hidden></div>
+      <div id="markers-panel" class="markers-panel" hidden><div class="marker-create"><input id="marker-label" aria-label="New marker label" placeholder="Marker label" maxlength="120" /><button id="marker-create" class="accent" title="Add marker at the sequence playhead">＋ At playhead</button></div><div class="marker-policy">Fixed sequence markers · do not extend export</div><div id="marker-list"></div></div>
       <div class="panel-foot"><span id="bin-count">0 items</span><span class="spacer"></span><span>Drag to timeline</span></div>
     </aside>
     <section id="monitors">
@@ -54,9 +55,9 @@
     <div class="timeline-toolbar">
       <div id="edit-tools"><button data-tool="select" class="active" title="Selection and edge trim (V)">↖ <kbd>V</kbd></button><button data-tool="razor" title="Razor (C). Split animated/fading clips is currently unsupported.">╱ <kbd>C</kbd></button><button data-tool="slip" title="Slip source window (Y)">↔ <kbd>Y</kbd></button><button data-tool="roll" title="Roll adjacent cut (N). Animated/fading right clips cannot be rebased yet.">][ <kbd>N</kbd></button></div>
       <span class="divider"></span><button id="btn-snap" class="active" title="Snap to clip boundaries/playhead (S)">⊓ Snap</button><button id="btn-duplicate" title="Duplicate selected clip (Ctrl+D)">Duplicate</button><button id="btn-delete" title="Delete selected clip (Delete)">Delete</button><label class="toggle"><input id="ripple-delete" type="checkbox" /> Ripple</label>
-      <span class="spacer"></span><span id="tool-status" class="subtle">Selection</span><span class="divider"></span><button id="zoom-fit" title="Fit sequence">Fit</button><span class="subtle">−</span><input id="timeline-zoom" type="range" min="20" max="300" value="90" aria-label="Timeline zoom" /><span class="subtle">＋</span>
+      <button id="btn-marker" title="Add a fixed sequence marker at playhead (M)">＋ M</button><button id="marker-prev" title="Previous sequence marker">‹ M</button><button id="marker-next" title="Next sequence marker">M ›</button><span class="spacer"></span><span id="tool-status" class="subtle">Selection</span><span class="divider"></span><button id="zoom-fit" title="Fit sequence">Fit</button><span class="subtle">−</span><input id="timeline-zoom" type="range" min="20" max="300" value="90" aria-label="Timeline zoom" /><span class="subtle">＋</span>
     </div>
-    <div id="timeline-body"><div id="track-headers"></div><div id="timeline-scroll"><canvas id="timeline"></canvas></div></div>
+    <div id="timeline-body"><div id="track-headers"></div><div id="timeline-scroll"><div id="timeline-area"><canvas id="timeline"></canvas></div></div></div>
     <div class="timeline-foot"><span class="live-dot"></span><span>Single project · live MCP</span><span class="spacer"></span><span id="selection-info">No clip selected</span><span class="divider"></span><span>CPU fallback</span></div>
   </section>
   <div id="toast" class="toast" role="status"></div>

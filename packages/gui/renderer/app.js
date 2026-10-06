@@ -1,11 +1,13 @@
 import { evaluateTransform, evaluateAnimatable, EASINGS } from '@freemier/shared/animation';
 import { EFFECT_CATALOG, createColorProcessor, fadeEnvelope } from '@freemier/shared/effects';
+import { frameTimecode, parseFrameTimecode } from '@freemier/shared/timecode';
 
 const BRIDGE = 'http://127.0.0.1:' + (new URLSearchParams(location.search).get('bridge') ?? '4317');
 const api = window.freemier ?? window.palmier;
 const $ = (id) => document.getElementById(id);
 let project = null, revision = -1, playhead = 0, playing = false, selectedClipId = null;
 let workspace = 'edit', browser = 'project', tool = 'select', snap = true, pps = 90, grid = true;
+let eventEpoch = null, eventSequence = -1;
 let sourceAssetId = null, sourceHead = 0, sourceIn = 0, sourceOut = 0, sourcePlaying = false, sourceEl = null;
 let targetTrackId = null, sourceFocused = false, audioContext = null, applying = false;
 const decoders = new Map(), thumbs = new Map(), pendingThumbs = new Map(), waveforms = new Map();
@@ -17,14 +19,13 @@ const fps = () => project?.timeline.fps ?? 30;
 const q = (t) => Math.round(t * fps()) / fps();
 const tracks = () => [...(project?.timeline.tracks ?? [])].sort((a, b) => b.order - a.order);
 const duration = () => Math.max(0, ...(project?.timeline.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)) ?? []));
+const viewEnd = () => Math.max(duration(), ...(project?.timeline.markers ?? []).map((m) => m.time));
 const find = (id = selectedClipId) => { for (const track of project?.timeline.tracks ?? []) { const clip = track.clips.find((c) => c.id === id); if (clip) return { track, clip }; } return null; };
 const assetFor = (clip) => project?.media.find((m) => m.id === clip.assetId);
 const mediaUrl = (asset) => BRIDGE + '/media/' + encodeURIComponent(asset.id);
 const local = (clip) => Math.max(0, Math.min(clip.duration, playhead - clip.start));
 function tc(seconds, rate = fps()) {
-  const nominal = Math.round(rate), frame = Math.max(0, Math.floor(seconds * rate + 1e-5));
-  const values = [Math.floor(frame / nominal / 3600), Math.floor(frame / nominal / 60) % 60, Math.floor(frame / nominal) % 60, frame % nominal];
-  return values.map((n) => String(n).padStart(2, '0')).join(':');
+  return frameTimecode(seconds, rate);
 }
 function toast(message, kind = '') { $('toast').textContent = message; $('toast').className = 'toast show ' + kind; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').className = 'toast', 3200); }
 function node(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
@@ -33,17 +34,26 @@ async function command(action, args = {}) {
   try {
     const result = await (await fetch(BRIDGE + '/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json();
     if (!result.ok) throw new Error(result.error?.message ?? 'Command failed');
+    if (result._bridge) applyState(result._bridge.project, result._bridge.revision, result._bridge);
     return result;
   } catch (error) { toast(error.message, 'error'); return null; }
 }
-function setHead(t, inspector = true) { playhead = q(Math.max(0, Math.min(duration(), t))); updateTransport(); syncPreview(); renderTimeline(); if (inspector) renderInspector(); }
+function setHead(t, inspector = true) {
+  playhead = q(Math.max(0, Math.min(viewEnd(), t))); updateTransport(); syncPreview(); renderTimeline(); if (inspector) renderInspector();
+  const scroll = $('timeline-scroll'), x = playhead * pps;
+  if (x < scroll.scrollLeft || x > scroll.scrollLeft + scroll.clientWidth - 8) scroll.scrollLeft = Math.max(0, x - scroll.clientWidth / 2);
+}
 function select(id) { selectedClipId = id; renderInspector(); renderTimeline(); }
 function applyState(next, nextRevision, history = {}) {
   if (!next?.timeline) return;
+  if (history.eventEpoch !== undefined && history.eventSequence !== undefined) {
+    if (eventEpoch === history.eventEpoch && history.eventSequence <= eventSequence && project) return;
+    eventEpoch = history.eventEpoch; eventSequence = history.eventSequence;
+  }
   const replace = project?.id !== next.id;
   project = next; revision = nextRevision ?? revision;
   if (replace) { selectedClipId = null; playhead = 0; playing = false; sourcePlaying = false; sourceAssetId = null; sourceEl?.pause?.(); $('source-stage').querySelectorAll('video,audio,img').forEach((el) => el.remove()); sourceEl = null; thumbs.clear(); pendingThumbs.clear(); waveforms.clear(); }
-  playhead = Math.min(playhead, duration());
+  playhead = Math.min(playhead, viewEnd());
   if (!find()) selectedClipId = null;
   $('project-name').textContent = next.name; $('sequence-name').textContent = next.timeline.name ?? 'Sequence';
   $('project-format').textContent = next.timeline.width + ' × ' + next.timeline.height + ' · ' + next.timeline.fps + ' fps';
@@ -71,11 +81,13 @@ function renderMediaBin() {
   if (!project) return;
   const query = $('bin-search').value.toLowerCase();
   $('media-bin').hidden = browser !== 'project'; $('effects-browser').hidden = browser !== 'effects';
-  $('bin-search').placeholder = browser === 'project' ? 'Search media' : 'Search effects';
+  $('markers-panel').hidden = browser !== 'markers';
+  $('bin-search').placeholder = browser === 'project' ? 'Search media' : browser === 'effects' ? 'Search effects' : 'Search markers';
   $('bin-search').setAttribute('aria-label', $('bin-search').placeholder);
   $('media-bin').className = 'media-bin ' + (grid ? 'grid' : 'list');
   const assets = project.media.filter((a) => a.name.toLowerCase().includes(query));
-  $('bin-count').textContent = (browser === 'project' ? assets.length : EFFECT_CATALOG.filter((e) => e.name.toLowerCase().includes(query)).length) + ' items';
+  $('bin-count').textContent = (browser === 'project' ? assets.length : browser === 'effects' ? EFFECT_CATALOG.filter((e) => e.name.toLowerCase().includes(query)).length : (project.timeline.markers ?? []).filter((m) => (m.label + ' ' + m.notes).toLowerCase().includes(query)).length) + ' items';
+  renderMarkers(query);
   $('media-bin').replaceChildren(...assets.map((asset) => {
     const item = node('div', 'media-item' + (asset.id === sourceAssetId ? ' selected' : '')); item.dataset.assetId = asset.id; item.draggable = true; item.tabIndex = 0;
     const img = node('img', 'media-thumb'); img.alt = asset.name; if (thumbs.has(asset.id)) img.src = thumbs.get(asset.id); else void thumbnail(asset, img);
@@ -95,6 +107,25 @@ function renderMediaBin() {
       tile.append(node('span', 'effect-icon', 'fx'), label); $('effects-browser').append(tile);
     }
   }
+}
+function renderMarkers(query = '') {
+  const list = $('marker-list'); list.replaceChildren();
+  for (const marker of (project?.timeline.markers ?? []).filter((m) => (m.label + ' ' + m.notes).toLowerCase().includes(query))) {
+    const row = node('div', 'marker-card'); row.dataset.markerId = marker.id; row.style.borderLeftColor = marker.color;
+    const title = node('div', 'marker-card-head'), jump = button(tc(marker.time), 'Seek marker ' + marker.label, () => setHead(marker.time)); jump.dataset.markerJump = marker.id;
+    const remove = button('×', 'Delete marker ' + marker.label, () => command('marker_remove', { markerId: marker.id })); remove.dataset.markerRemove = marker.id; title.append(jump, remove);
+    const label = node('input'); label.value = marker.label; label.maxLength = 120; label.setAttribute('aria-label', 'Marker label ' + marker.id); label.addEventListener('change', () => command('marker_update', { markerId: marker.id, label: label.value }));
+    const color = node('input'); color.type = 'color'; color.value = marker.color; color.setAttribute('aria-label', 'Marker color ' + marker.id); color.addEventListener('change', () => command('marker_update', { markerId: marker.id, color: color.value }));
+    const notes = node('textarea'); notes.rows = 2; notes.maxLength = 4096; notes.value = marker.notes; notes.placeholder = 'Notes'; notes.setAttribute('aria-label', 'Marker notes ' + marker.id); notes.addEventListener('change', () => command('marker_update', { markerId: marker.id, notes: notes.value }));
+    row.append(title, label, color); numericControl(row, 'Time (seconds)', marker.time, 0, 86400, 1 / fps(), (time) => command('marker_update', { markerId: marker.id, time })); row.append(notes); list.append(row);
+  }
+  if (!list.children.length) list.append(node('div', 'empty', 'Add a marker at the playhead. M adds a point; the arrow controls navigate points.'));
+}
+async function addAtHead() { await command('marker_add', { time: playhead, label: $('marker-label').value.trim() || 'Marker ' + tc(playhead) }); }
+function navigateMarker(direction) {
+  const ordered = [...(project?.timeline.markers ?? [])].sort((a, b) => a.time - b.time);
+  const marker = direction > 0 ? ordered.find((m) => m.time > playhead + 1e-6) : ordered.filter((m) => m.time < playhead - 1e-6).at(-1);
+  if (marker) setHead(marker.time);
 }
 async function thumbnail(asset, img) {
   try {
@@ -312,18 +343,23 @@ function renderTrackHeaders() {
 }
 function renderTimeline() {
   if (!project) return;
-  const dpr = devicePixelRatio || 1, ordered = tracks(), width = Math.max($('timeline-scroll').clientWidth, (Math.max(10, duration() + 2)) * pps), height = Math.max(ordered.length * TRACK_H + RULER_H + 24, $('timeline-scroll').clientHeight - 2);
-  canvas.style.width = width + 'px'; canvas.style.height = height + 'px'; canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  canvas._xOf = (t) => t * pps; canvas._tOf = (x) => x / pps; canvas.dataset.trackHeight = TRACK_H; canvas.dataset.rulerHeight = RULER_H; canvas.dataset.pps = pps;
+  const scroll = $('timeline-scroll'), dpr = devicePixelRatio || 1, ordered = tracks();
+  const width = Math.max(scroll.clientWidth, Math.max(10, viewEnd() + 2) * pps), height = Math.max(ordered.length * TRACK_H + RULER_H + 24, scroll.clientHeight);
+  $('timeline-area').style.width = width + 'px'; $('timeline-area').style.height = height + 'px';
+  const visibleWidth = Math.max(1, scroll.clientWidth), visibleHeight = Math.max(1, scroll.clientHeight), offsetX = scroll.scrollLeft, offsetY = scroll.scrollTop;
+  canvas.style.width = visibleWidth + 'px'; canvas.style.height = visibleHeight + 'px'; canvas.width = Math.round(visibleWidth * dpr); canvas.height = Math.round(visibleHeight * dpr); ctx.setTransform(dpr, 0, 0, dpr, -offsetX * dpr, -offsetY * dpr);
+  canvas._xOf = (t) => t * pps; canvas._tOf = (x) => (x + scroll.scrollLeft) / pps; canvas.dataset.trackHeight = TRACK_H; canvas.dataset.rulerHeight = RULER_H; canvas.dataset.pps = pps;
   canvas.dataset.waveformPeaks = [...waveforms.values()].reduce((n, peaks) => n + peaks.length, 0);
   ctx.fillStyle = '#1a1c21'; ctx.fillRect(0, 0, width, height); ctx.fillStyle = '#282b33'; ctx.fillRect(0, 0, width, RULER_H);
   let step = .1; while (step * pps < 70) step = step < 1 ? step * 2 : step < 2 ? 2 : step < 5 ? 5 : step * 2;
   ctx.font = '9px ui-monospace,monospace'; ctx.textBaseline = 'middle';
-  for (let t = 0; t * pps <= width; t += step) { const x = t * pps; ctx.strokeStyle = '#2f333d'; ctx.beginPath(); ctx.moveTo(x, RULER_H); ctx.lineTo(x, height); ctx.stroke(); ctx.fillStyle = '#7c859a'; ctx.fillText(tc(t), x + 5, 13); }
+  for (let t = Math.floor(offsetX / pps / step) * step; t * pps <= offsetX + visibleWidth; t += step) { const x = t * pps; ctx.strokeStyle = '#2f333d'; ctx.beginPath(); ctx.moveTo(x, RULER_H); ctx.lineTo(x, height); ctx.stroke(); ctx.fillStyle = '#7c859a'; ctx.fillText(tc(t), x + 5, 13); }
+  for (const marker of project.timeline.markers ?? []) { const x = marker.time * pps; if (x < offsetX - 8 || x > offsetX + visibleWidth + 8) continue; ctx.fillStyle = marker.color; ctx.beginPath(); ctx.moveTo(x - 5, 0); ctx.lineTo(x + 5, 0); ctx.lineTo(x + 5, 13); ctx.lineTo(x, 18); ctx.lineTo(x - 5, 13); ctx.closePath(); ctx.fill(); }
   for (let i = 0; i < ordered.length; i++) {
-    const track = ordered[i], y = RULER_H + i * TRACK_H; ctx.fillStyle = track.kind === 'audio' ? '#1d2525' : '#1e222a'; ctx.fillRect(0, y, width, TRACK_H - 1);
+    const track = ordered[i], y = RULER_H + i * TRACK_H; if (y + TRACK_H < offsetY || y > offsetY + visibleHeight) continue; ctx.fillStyle = track.kind === 'audio' ? '#1d2525' : '#1e222a'; ctx.fillRect(0, y, width, TRACK_H - 1);
     for (const clip of track.clips) {
       const x = clip.start * pps, w = Math.max(2, clip.duration * pps), h = TRACK_H - 10, asset = assetFor(clip), selected = clip.id === selectedClipId;
+      if (x + w < offsetX || x > offsetX + visibleWidth) continue;
       ctx.globalAlpha = track.muted ? .4 : 1; ctx.fillStyle = track.kind === 'video' ? '#3b6ea5' : '#3f7a68'; ctx.fillRect(x + 1, y + 4, w - 2, h);
       ctx.fillStyle = track.kind === 'video' ? '#446784' : '#456f62'; ctx.fillRect(x + 1, y + 4, w - 2, 16);
       if (track.kind === 'audio') { if (asset?.hasAudio && !waveforms.has(asset.id)) { waveforms.set(asset.id, []); fetch(BRIDGE + '/waveform', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }) }).then((r) => r.json()).then((result) => { if (result.ok) waveforms.set(asset.id, result.peaks); renderTimeline(); }).catch(() => {}); }
@@ -348,8 +384,8 @@ function snapped(time, ignore) {
 let gesture = null;
 canvas.addEventListener('pointerdown', (event) => {
   if (!project) return; sourceFocused = false;
-  const rect = canvas.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top, time = x / pps;
-  if (y < RULER_H) { setHead(time); return; }
+  const rect = canvas.getBoundingClientRect(), x = event.clientX - rect.left + $('timeline-scroll').scrollLeft, y = event.clientY - rect.top + $('timeline-scroll').scrollTop, time = x / pps;
+  if (y < RULER_H) { const marker = (project.timeline.markers ?? []).find((m) => Math.abs(m.time * pps - x) < 8); setHead(marker?.time ?? time); return; }
   const track = tracks()[Math.floor((y - RULER_H) / TRACK_H)]; if (!track) return;
   targetTrackId = track.id; const clip = track.clips.find((c) => time >= c.start && time < c.start + c.duration); select(clip?.id ?? null); renderTrackHeaders();
   if (!clip) { setHead(time); return; }
@@ -358,21 +394,21 @@ canvas.addEventListener('pointerdown', (event) => {
   const edge = tool === 'select' && Math.abs(x - clip.start * pps) < 6 ? 'in' : tool === 'select' && Math.abs(x - (clip.start + clip.duration) * pps) < 6 ? 'out' : null;
   gesture = { pointer: event.pointerId, x, track, clip, edge, tool }; $('tool-status').textContent = edge ? 'Trim ' + edge : tool;
 });
-canvas.addEventListener('pointermove', (event) => { if (gesture) { const delta = (event.clientX - canvas.getBoundingClientRect().left - gesture.x) / pps; $('tool-status').textContent = gesture.tool + ' ' + (delta >= 0 ? '+' : '') + q(delta).toFixed(2) + 's'; } });
+canvas.addEventListener('pointermove', (event) => { if (gesture) { const delta = (event.clientX - canvas.getBoundingClientRect().left + $('timeline-scroll').scrollLeft - gesture.x) / pps; $('tool-status').textContent = gesture.tool + ' ' + (delta >= 0 ? '+' : '') + q(delta).toFixed(2) + 's'; } });
 canvas.addEventListener('pointerup', async (event) => {
-  if (!gesture) return; const g = gesture; gesture = null; const rect = canvas.getBoundingClientRect(), x = event.clientX - rect.left, delta = q((x - g.x) / pps); if (Math.abs(delta) < 1 / fps()) { $('tool-status').textContent = tool; return; }
+  if (!gesture) return; const g = gesture; gesture = null; const rect = canvas.getBoundingClientRect(), x = event.clientX - rect.left + $('timeline-scroll').scrollLeft, delta = q((x - g.x) / pps); if (Math.abs(delta) < 1 / fps()) { $('tool-status').textContent = tool; return; }
   if (g.tool === 'slip') await command('clip_slip', { clipId: g.clip.id, delta });
   else if (g.tool === 'roll') { const right = g.track.clips.find((c) => Math.abs(c.start - (g.clip.start + g.clip.duration)) < 1e-6); if (right) await command('clip_roll', { leftClipId: g.clip.id, rightClipId: right.id, at: snapped(right.start + delta) }); else toast('Roll requires an adjacent clip to the right', 'error'); }
   else if (g.edge) await command('clip_trim', { clipId: g.clip.id, edge: g.edge, time: snapped((g.edge === 'in' ? g.clip.start : g.clip.start + g.clip.duration) + delta, g.clip.id) });
-  else { const target = tracks()[Math.floor((event.clientY - rect.top - RULER_H) / TRACK_H)]; await command('clip_move', { clipId: g.clip.id, start: snapped(g.clip.start + delta, g.clip.id), trackId: target?.id ?? g.track.id }); }
+  else { const target = tracks()[Math.floor((event.clientY - rect.top + $('timeline-scroll').scrollTop - RULER_H) / TRACK_H)]; await command('clip_move', { clipId: g.clip.id, start: snapped(g.clip.start + delta, g.clip.id), trackId: target?.id ?? g.track.id }); }
   $('tool-status').textContent = tool; renderTimeline();
 });
 canvas.addEventListener('pointercancel', () => { gesture = null; });
 canvas.addEventListener('dragover', (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; });
 canvas.addEventListener('drop', async (event) => {
   event.preventDefault(); const id = event.dataTransfer.getData('application/x-freemier-asset') || event.dataTransfer.getData('text/plain'); if (!project.media.some((a) => a.id === id)) return;
-  const rect = canvas.getBoundingClientRect(), track = tracks()[Math.floor((event.clientY - rect.top - RULER_H) / TRACK_H)]; if (!track) return;
-  const source = id === sourceAssetId, result = await command('clip_add', { trackId: track.id, assetId: id, start: snapped((event.clientX - rect.left) / pps), sourceIn: source ? sourceIn : 0, duration: source ? sourceOut - sourceIn : undefined, strict: true });
+  const rect = canvas.getBoundingClientRect(), track = tracks()[Math.floor((event.clientY - rect.top + $('timeline-scroll').scrollTop - RULER_H) / TRACK_H)]; if (!track) return;
+  const source = id === sourceAssetId, result = await command('clip_add', { trackId: track.id, assetId: id, start: snapped((event.clientX - rect.left + $('timeline-scroll').scrollLeft) / pps), sourceIn: source ? sourceIn : 0, duration: source ? sourceOut - sourceIn : undefined, strict: true });
   if (result) select(result.clip.id);
 });
 
@@ -394,7 +430,7 @@ $('btn-save').addEventListener('click', saveProject); $('btn-open').addEventList
 $('btn-undo').addEventListener('click', () => command('undo')); $('btn-redo').addEventListener('click', () => command('redo'));
 $('btn-play').addEventListener('click', togglePlay); $('btn-start').addEventListener('click', () => setHead(0)); $('btn-end').addEventListener('click', () => setHead(duration())); $('btn-prev').addEventListener('click', () => setHead(playhead - 1 / fps())); $('btn-next').addEventListener('click', () => setHead(playhead + 1 / fps()));
 $('scrub').addEventListener('input', () => { sourceFocused = false; setHead(Number($('scrub').value) / 1000 * duration()); });
-$('timecode-input').addEventListener('change', () => { const values = $('timecode-input').value.split(':').map(Number); if (values.length === 4 && values.every(Number.isFinite)) setHead(values[0] * 3600 + values[1] * 60 + values[2] + values[3] / fps()); else { toast('Use HH:MM:SS:FF', 'error'); updateTransport(); } });
+$('timecode-input').addEventListener('change', () => { try { setHead(parseFrameTimecode($('timecode-input').value, fps())); } catch (error) { toast(error.message, 'error'); updateTransport(); } });
 $('source-monitor').addEventListener('pointerdown', () => sourceFocused = true); $('program-monitor').addEventListener('pointerdown', () => sourceFocused = false);
 $('source-scrub').addEventListener('input', () => { const asset = project?.media.find((a) => a.id === sourceAssetId); if (asset) sourceSeek(Number($('source-scrub').value) / 1000 * asset.duration); });
 $('source-prev').addEventListener('click', () => sourceSeek(sourceHead - 1 / fps())); $('source-next').addEventListener('click', () => sourceSeek(sourceHead + 1 / fps()));
@@ -409,8 +445,11 @@ for (const button of document.querySelectorAll('#workspace-tabs [data-workspace]
 for (const button of document.querySelectorAll('[data-tool]')) button.addEventListener('click', () => setTool(button.dataset.tool));
 $('btn-snap').addEventListener('click', () => { snap = !snap; $('btn-snap').classList.toggle('active', snap); }); $('btn-duplicate').addEventListener('click', duplicateSelected); $('btn-delete').addEventListener('click', deleteSelected);
 $('timeline-zoom').addEventListener('input', () => { pps = Number($('timeline-zoom').value); renderTimeline(); }); $('zoom-fit').addEventListener('click', () => { pps = Math.max(20, Math.min(300, $('timeline-scroll').clientWidth / Math.max(duration() + .5, 1))); $('timeline-zoom').value = pps; renderTimeline(); });
-$('timeline-scroll').addEventListener('scroll', () => { $('track-headers').scrollTop = $('timeline-scroll').scrollTop; });
+$('timeline-scroll').addEventListener('scroll', () => { $('track-headers').scrollTop = $('timeline-scroll').scrollTop; renderTimeline(); });
+new ResizeObserver(renderTimeline).observe($('timeline-scroll'));
 $('btn-add-video').addEventListener('click', () => command('track_add', { kind: 'video' })); $('btn-add-audio').addEventListener('click', () => command('track_add', { kind: 'audio' }));
+$('btn-marker').addEventListener('click', addAtHead); $('marker-create').addEventListener('click', addAtHead);
+$('marker-prev').addEventListener('click', () => navigateMarker(-1)); $('marker-next').addEventListener('click', () => navigateMarker(1));
 document.addEventListener('keydown', (event) => {
   if (event.target.closest?.('input,textarea,select,[contenteditable=true]')) return;
   const key = event.key.toLowerCase(), mod = event.ctrlKey || event.metaKey;
@@ -423,6 +462,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'home') setHead(0); else if (key === 'end') setHead(duration());
   else if (key === 'delete' || key === 'backspace') { event.preventDefault(); deleteSelected(); }
   else if (key === 's') $('btn-snap').click();
+  else if (key === 'm') { event.preventDefault(); void addAtHead(); }
   else if (['v', 'c', 'y', 'n'].includes(key)) setTool({ v: 'select', c: 'razor', y: 'slip', n: 'roll' }[key]);
   else if (sourceFocused && key === 'i') $('source-in').click(); else if (sourceFocused && key === 'o') $('source-out').click();
 });

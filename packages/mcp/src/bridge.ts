@@ -1,6 +1,7 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { promises as fs } from 'node:fs';
 import { createReadStream } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { EditorStore } from '@freemier/engine';
 import { z } from 'zod';
@@ -44,6 +45,9 @@ export class LiveBridge {
   #unsubscribe: (() => void) | null = null;
   #thumbnails = new Map<string, Promise<string>>();
   #waveforms = new Map<string, Promise<number[]>>();
+  // Delivery ordering is separate from snapshot revisions restored by undo.
+  #eventSequence = 0;
+  readonly #eventEpoch = randomUUID();
 
   constructor(opts: BridgeOptions) {
     this.#store = opts.store;
@@ -66,12 +70,13 @@ export class LiveBridge {
 
     // Push every store change to all connected renderers.
     this.#unsubscribe = this.#store.subscribe((event) => {
+      this.#eventSequence++;
       this.#broadcast({
         type: 'change',
         revision: event.revision,
         kind: event.kind,
         ids: event.ids,
-        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo },
+        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch },
       });
     });
 
@@ -119,6 +124,10 @@ export class LiveBridge {
     res.end(payload);
   }
 
+  #snapshot() {
+    return { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch };
+  }
+
   /** Read and parse a JSON request body, bounded to 1 MB. */
   static async #readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = [];
@@ -152,7 +161,8 @@ export class LiveBridge {
       const parsed = z.object(tool.inputSchema).safeParse(body);
       if (!parsed.success) throw new EditorError('INVALID_ARGUMENT', 'Invalid command arguments', { issues: parsed.error.issues });
       const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, notify: () => {} });
-      this.#json(res, 200, result);
+      if (typeof result !== 'object' || result === null || Array.isArray(result)) throw new EditorError('INTERNAL', 'Bridge tool must return an object');
+      this.#json(res, 200, { ...result, _bridge: this.#snapshot() });
     } catch (err) {
       const e = err as EditorError;
       this.#json(res, 400, {
@@ -265,12 +275,7 @@ export class LiveBridge {
     }
 
     if (route === '/state') {
-      this.#json(res, 200, {
-        project: this.#store.project,
-        revision: this.#store.revision,
-        canUndo: this.#store.canUndo,
-        canRedo: this.#store.canRedo,
-      });
+      this.#json(res, 200, this.#snapshot());
       return;
     }
 
@@ -290,7 +295,7 @@ export class LiveBridge {
       res.write(`data: ${JSON.stringify({
         type: 'snapshot',
         revision: this.#store.revision,
-        state: { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo },
+        state: this.#snapshot(),
       })}\n\n`);
 
       // Keepalive so proxies and the browser do not drop an idle stream.

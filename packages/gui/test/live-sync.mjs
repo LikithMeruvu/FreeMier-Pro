@@ -46,14 +46,14 @@ class Cdp {
 }
 const snapshot = `(() => {
   const canvas=document.querySelector('#timeline'), pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
-  let hash=0,clipPixels=0;for(let i=0;i<pixels.length;i+=4){hash=Math.imul(hash^pixels[i]^pixels[i+1]^pixels[i+2],16777619);if(pixels[i]===59&&pixels[i+1]===110&&pixels[i+2]===165)clipPixels++;}
+  let hash=0,clipPixels=0,markerPixels=0;for(let i=0;i<pixels.length;i+=4){hash=Math.imul(hash^pixels[i]^pixels[i+1]^pixels[i+2],16777619);if(pixels[i]===59&&pixels[i+1]===110&&pixels[i+2]===165)clipPixels++;if(i<canvas.width*Number(canvas.dataset.rulerHeight)*devicePixelRatio*4&&pixels[i]===255&&pixels[i+1]===0&&pixels[i+2]===128)markerPixels++;}
   const program=document.querySelector('#program-canvas'),data=program.getContext('2d').getImageData(0,0,program.width,program.height).data;
   let spread=0,luma=0;for(let i=0;i<data.length;i+=4){spread+=Math.max(data[i],data[i+1],data[i+2])-Math.min(data[i],data[i+1],data[i+2]);luma+=(data[i]+data[i+1]+data[i+2])/3;}
   const media=(selector)=>[...document.querySelectorAll(selector)].map(v=>{
     let decodedLuma; if(v.tagName==='VIDEO'&&v.readyState>=2){const c=document.createElement('canvas');c.width=c.height=16;const x=c.getContext('2d');x.drawImage(v,0,0,16,16);const p=x.getImageData(0,0,16,16).data;let sum=0;for(let i=0;i<p.length;i+=4)sum+=(p[i]+p[i+1]+p[i+2])/3;decodedLuma=sum/256;}
     return {clipId:v.dataset.clipId,assetId:v.dataset.assetId,width:v.videoWidth,height:v.videoHeight,ready:v.readyState,time:v.currentTime,paused:v.paused,decodedLuma,gain:Number(v.dataset.gain??1),transform:v.dataset.transform?JSON.parse(v.dataset.transform):null,error:v.error?.message};});
   return {name:document.querySelector('#project-name').textContent,revision:Number(document.querySelector('#revision').textContent.replace('rev ','')),media:document.querySelectorAll('.media-item').length,thumbs:[...document.querySelectorAll('.media-thumb')].filter(i=>i.complete&&i.naturalWidth>0).length,
-    timeline:{width:canvas.width,height:canvas.height,hash:hash>>>0,clipPixels,waveformPeaks:Number(canvas.dataset.waveformPeaks??0),pps:Number(canvas.dataset.pps)},
+    timeline:{width:canvas.width,height:canvas.height,hash:hash>>>0,clipPixels,markerPixels,waveformPeaks:Number(canvas.dataset.waveformPeaks??0),pps:Number(canvas.dataset.pps)},
     program:{width:program.width,height:program.height,spread:spread/(data.length/4),luma:luma/(data.length/4)},videos:media('#preview-stage video'),audio:media('#preview-stage audio'),source:media('#source-stage video'),timecode:document.querySelector('#timecode').textContent,
     sourceTime:document.querySelector('#source-timecode').textContent,sourceRange:document.querySelector('#source-range').textContent,workspace:document.body.dataset.workspace,tool:document.querySelector('[data-tool].active')?.dataset.tool,note:document.querySelector('#preview-note').textContent,toast:document.querySelector('#toast').textContent,origin:performance.timeOrigin};})()`;
 async function stop(child) { if (!child || child.exitCode !== null) return; child.kill(); await Promise.race([new Promise((r) => child.once('exit', r)), sleep(4000)]); if (child.exitCode === null) child.kill('SIGKILL'); }
@@ -65,18 +65,21 @@ try {
   const env = { ...process.env, FREEMIER_WORKSPACE: workspace, FREEMIER_BRIDGE_PORT: String(port), FREEMIER_TEST_MODE: '1', FREEMIER_TEST_DIALOGS: JSON.stringify({ media: [path.join(ROOT, 'fixtures/media/clipB.mp4')], output, project: projectPath }) }; delete env.ELECTRON_RUN_AS_NODE;
   server = spawn(process.execPath, [path.join(ROOT, 'packages/mcp/dist/cli.js')], { cwd: ROOT, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); server.stderr.on('data', (d) => serverError += d);
   const rpc = new Rpc(server); await rpc.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'professional-electron-acceptance', version: '2' } }); server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  const tools = (await rpc.request('tools/list')).tools; assert.equal(tools.length, 42); check('real stdio handshake discovers 42 tools', { count: tools.length });
+  const tools = (await rpc.request('tools/list')).tools; assert.equal(tools.length, 46); check('real stdio handshake discovers 46 tools', { count: tools.length });
   await waitFor('owning bridge', async () => (await fetch('http://127.0.0.1:' + port + '/health')).ok);
   await rpc.call('project_create', { name: 'Framecraft · Launch Film', fps: 30, width: 640, height: 360 });
   gui = spawn(ELECTRON, [path.join(ROOT, 'packages/gui'), '--remote-debugging-port=' + debugPort, '--remote-debugging-address=127.0.0.1'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); gui.stdout.on('data', (d) => guiError += d); gui.stderr.on('data', (d) => guiError += d);
   const target = await waitFor('production Electron CDP', async () => (await (await fetch('http://127.0.0.1:' + debugPort + '/json/list')).json()).find((t) => t.type === 'page' && t.url.includes('renderer/index.html')));
   cdp = new Cdp(); await cdp.connect(target.webSocketDebuggerUrl);
+  await cdp.evaluate('window.__nativeClicks=[];document.addEventListener("pointerdown",e=>window.__nativeClicks.push({type:"down",id:e.target.id,tag:e.target.tagName,x:e.clientX,y:e.clientY}),true);document.addEventListener("click",e=>window.__nativeClicks.push({type:"click",id:e.target.id,tag:e.target.tagName,x:e.clientX,y:e.clientY}),true)');
   // Use the production window's real viewport and DPI. A larger emulated
   // viewport would hide the bottom of the UI in native Windows captures.
   const read = () => cdp.evaluate(snapshot);
   async function click(selector) {
-    await waitFor('enabled visible control ' + selector, () => cdp.evaluate('(()=>{const e=document.querySelector(' + JSON.stringify(selector) + ');return !!e&&!e.disabled&&e.getClientRects().length>0;})()'));
-    await cdp.evaluate('document.querySelector(' + JSON.stringify(selector) + ').click()');
+    const point = await waitFor('enabled hit-testable control ' + selector, () => cdp.evaluate('(()=>{const e=document.querySelector(' + JSON.stringify(selector) + ');if(!e||e.disabled||!e.getClientRects().length)return false;e.scrollIntoView({block:"nearest",inline:"nearest"});const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return e.contains(document.elementFromPoint(x,y))&&{x,y};})()'));
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   }
   const input = (selector, value, event = 'change') => cdp.evaluate('(()=>{const i=document.querySelector(' + JSON.stringify(selector) + ');i.value=' + JSON.stringify(String(value)) + ';i.dispatchEvent(new Event(' + JSON.stringify(event) + ',{bubbles:true}));})()');
   const keyboard = (key, extra = {}) => cdp.evaluate('document.body.dispatchEvent(new KeyboardEvent("keydown",' + JSON.stringify({ key, bubbles: true, ...extra }) + '))');
@@ -96,7 +99,8 @@ try {
   const second = (await rpc.call('clip_add', { trackId: v1, assetId: assetB.id, start: 3, duration: 2, label: '02  Product detail' })).clip;
   await waitFor('frame timecode', async () => (await read()).timecode.endsWith('/ 00:00:05:00')); check('native GUI import edits the owning MCP library');
   async function point(trackId, time) {
-    return cdp.evaluate('(()=>{const c=document.querySelector("#timeline"),s=document.querySelector("#timeline-scroll"),i=[...document.querySelectorAll(".track-header")].findIndex(t=>t.dataset.trackId===' + JSON.stringify(trackId) + '),y=Number(c.dataset.rulerHeight)+i*Number(c.dataset.trackHeight)+30;if(y<s.scrollTop||y>s.scrollTop+s.clientHeight-8)s.scrollTop=Math.max(0,y-s.clientHeight/2);const x=c._xOf(' + time + ');if(x<s.scrollLeft||x>s.scrollLeft+s.clientWidth-8)s.scrollLeft=Math.max(0,x-s.clientWidth/2);const r=c.getBoundingClientRect();return {x:r.left+x,y:r.top+y};})()');
+    await waitFor('painted track header ' + trackId, () => cdp.evaluate('!!document.querySelector(".track-header[data-track-id=' + trackId + ']")'));
+    return cdp.evaluate('(()=>{const c=document.querySelector("#timeline"),s=document.querySelector("#timeline-scroll"),i=[...document.querySelectorAll(".track-header")].findIndex(t=>t.dataset.trackId===' + JSON.stringify(trackId) + '),y=Number(c.dataset.rulerHeight)+i*Number(c.dataset.trackHeight)+30;if(y<s.scrollTop||y>s.scrollTop+s.clientHeight-8)s.scrollTop=Math.max(0,y-s.clientHeight/2);const x=c._xOf(' + time + ');if(x<s.scrollLeft||x>s.scrollLeft+s.clientWidth-8)s.scrollLeft=Math.max(0,x-s.clientWidth/2);const r=c.getBoundingClientRect();return {x:r.left+x-s.scrollLeft,y:r.top+y-s.scrollTop};})()');
   }
   async function gesture(trackId, time, delta = 0) {
     const p = await point(trackId, time), pixels = (await read()).timeline.pps;
@@ -150,9 +154,24 @@ try {
   await keyboard('c'); await gesture(v1, 4); await waitFor('razor unanimated clip', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 4); await click('#btn-undo'); await waitFor('razor undo', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 3); await keyboard('v'); await gesture(v1, 4.99, -.2); await waitFor('edge trim', async () => (await rpc.call('clip_inspect', { clipId: second.id })).clip.duration < 1.9); await click('#btn-undo'); check('razor and edge-trim gestures execute real edits and undo');
   await click('[data-track-mute="' + a1 + '"]'); await waitFor('audio mute removes decoder', async () => (await read()).audio.length === 0); await click('[data-track-mute="' + a1 + '"]'); await waitFor('audio unmute restores decoder', async () => (await read()).audio.some((a) => a.ready >= 2)); check('track mute/unmute controls actual media preview');
   const oldPps = (await read()).timeline.pps; await input('#timeline-zoom', 180, 'input'); assert.ok((await read()).timeline.pps > oldPps); await click('#btn-snap'); assert.equal(await cdp.evaluate('document.querySelector("#btn-snap").classList.contains("active")'), false); await click('#btn-snap'); await click('#zoom-fit'); check('timeline zoom/fit and snap toggle use real coordinate mapping');
+  const hook = (await rpc.call('marker_add', { time: 1.5, label: 'Hook', notes: 'Opening\nBeat', color: '#ff0080' })).marker;
+  await waitFor('actual MCP marker flag pixels', async () => (await read()).timeline.markerPixels > 20); await click('[data-browser="markers"]');
+  await input('input[aria-label="Marker label ' + hook.id + '"]', 'Opening hook'); await waitFor('GUI marker edit', async () => (await rpc.call('marker_list')).markers.some((m) => m.id === hook.id && m.label === 'Opening hook'));
+  await input('.marker-card[data-marker-id="' + hook.id + '"] input[aria-label="Time (seconds)"]', 1.6); await waitFor('marker time frame 48', async () => (await rpc.call('marker_list')).markers.some((m) => m.id === hook.id && m.frame === 48));
+  await input('#timecode-input', '00:00:06:00'); await input('#marker-label', 'Detail beat'); await click('#marker-create');
+  const detail = await waitFor('GUI marker creation reflected in MCP', async () => (await rpc.call('marker_list')).markers.find((m) => m.label === 'Detail beat' && m.frame === 180));
+  await click('#marker-prev'); await waitFor('previous marker actual decoded frame', async () => (await read()).timecode.startsWith('00:00:01:18') && (await read()).videos.some((v) => v.clipId === first.id && Math.abs(v.time - 1.6) < .001)).catch(async (error) => { console.error('Marker navigation state:', JSON.stringify(await rpc.call('marker_list'))); console.error('Marker controls:', await cdp.evaluate('[...document.querySelectorAll(".marker-card")].map(e=>({id:e.dataset.markerId,time:e.querySelector("input[type=number]").value,button:e.querySelector("button").textContent}))')); console.error('Native click trace:', await cdp.evaluate('window.__nativeClicks.slice(-10)')); throw error; });
+  await click('#marker-next'); await waitFor('next marker navigation', async () => (await read()).timecode.startsWith('00:00:06:00'));
+  const outside = (await rpc.call('marker_add', { time: 11, label: 'Planning note beyond media' })).marker;
+  await click('[data-marker-jump="' + outside.id + '"]'); await waitFor('marker outside content navigates without rendered-duration inflation', async () => (await read()).timecode === '00:00:11:00 / 00:00:07:00' && (await read()).videos.length === 0 && (await read()).program.luma === 0);
+  await click('[data-marker-remove="' + detail.id + '"]'); await waitFor('marker deletion painted', async () => (await rpc.call('marker_list')).markers.length === 2 && !await cdp.evaluate('!!document.querySelector("[data-marker-id=' + detail.id + ']")'));
+  await click('#btn-undo'); await waitFor('marker undo restores GUI', async () => (await rpc.call('marker_list')).markers.length === 3 && await cdp.evaluate('!!document.querySelector("[data-marker-id=' + detail.id + ']")'));
+  await click('[data-marker-jump="' + hook.id + '"]'); await waitFor('hook decoded after marker undo', async () => (await read()).program.luma > 10); await click('[data-browser="project"]');
+  check('MCP marker flags, GUI edit/create/delete/undo and navigation use fixed sequence frames');
   await click('#btn-save'); await waitFor('portable GUI save', async () => (await fs.stat(path.join(projectPath, 'project.json'))).size > 100); const saved = JSON.parse(await fs.readFile(path.join(projectPath, 'project.json'), 'utf8')); assert.ok(saved.media.find((m) => m.id === assetA.id).copied); assert.ok((await fs.stat(path.join(projectPath, 'media', saved.media.find((m) => m.id === assetA.id).path))).size > 1000);
   await gesture(v1, 5.5); await click('#btn-delete'); await waitFor('edit after save', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 2); await fs.unlink(path.join(workspace, 'media', assetA.path)); await click('#btn-open'); await waitFor('GUI load restores saved sequence', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 3);
   assert.ok(path.isAbsolute((await rpc.call('media_inspect', { assetId: assetA.id })).asset.path)); check('save/load packages copied media and restores owning store after original copy removal');
+  assert.equal((await rpc.call('marker_list')).markers.length, 3); assert.ok((await read()).timeline.markerPixels > 20); check('markers survive portable save/load without extending the seven-second export');
   if (!screenshotOnly) {
     await cdp.evaluate('window.__exportUpdates=[];new MutationObserver(()=>window.__exportUpdates.push(document.querySelector("#btn-export").dataset.progress)).observe(document.querySelector("#btn-export"),{attributes:true});document.querySelector("#btn-export").click();');
     await waitFor('actual GUI export', async () => { await fs.stat(output); return cdp.evaluate('!document.querySelector("#btn-export").disabled&&document.querySelector("#toast").textContent.startsWith("Exported")'); }, 120000);
@@ -172,6 +191,15 @@ try {
   const png = Buffer.from(capture, 'base64'); assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]); assert.ok(png.length > 10000);
   await fs.mkdir(path.dirname(screenshotPath), { recursive: true }); await fs.writeFile(screenshotPath, png);
   check('decoded professional workspace screenshot with zero renderer errors/reloads', { screenshotPath: path.relative(ROOT, screenshotPath), source: final.source.map((s) => ({ width: s.width, height: s.height, ready: s.ready })), program: final.program });
+  await rpc.call('project_create', { name: 'Fractional-rate marker navigation', fps: 23.976 });
+  await rpc.call('marker_add', { time: 14400 / 23.976, label: 'Ten minutes NDF', color: '#ff0080' });
+  await waitFor('fractional project snapshot', async () => (await read()).name === 'Fractional-rate marker navigation');
+  await input('#timecode-input', '00:10:00:00');
+  await waitFor('fractional timecode navigation and virtual marker painting', async () => (await read()).timecode.startsWith('00:10:00:00') && (await read()).timeline.markerPixels > 20);
+  assert.ok((await read()).timeline.width < 8192); assert.ok(await cdp.evaluate('document.querySelector("#timeline-scroll").scrollLeft>50000'));
+  await input('#timecode-input', '00:60:00:00'); await waitFor('invalid timecode refusal', async () => (await read()).toast.includes('Invalid timecode')); assert.ok((await read()).timecode.startsWith('00:10:00:00'));
+  assert.deepEqual(cdp.errors, []); assert.equal(cdp.loads, loads);
+  check('fractional NDF parsing, invalid clock refusal and bounded Canvas paint at ten-minute marker');
   if (!screenshotOnly) await fs.writeFile(path.join(ROOT, 'docs/live-acceptance.json'), JSON.stringify({ date: new Date().toISOString(), platform: process.platform, checks, final }, null, 2) + '\n');
   console.log('RESULT: ' + checks.length + ' real-app checks passed');
 } catch (error) {

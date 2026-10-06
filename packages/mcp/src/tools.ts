@@ -12,6 +12,7 @@ import { promises as fs } from 'node:fs';
 import { newMediaId, defaultTransform, EditorError } from '@freemier/shared';
 import type { Clip } from '@freemier/shared';
 import { PROFESSIONAL_TOOLS } from './professional-tools.js';
+import { MARKER_TOOLS } from './marker-tools.js';
 
 /**
  * The MCP tool surface.
@@ -51,6 +52,7 @@ function assertExportable(store: EditorStore): void {
 
 export const TOOLS: ToolDef[] = [
   ...PROFESSIONAL_TOOLS,
+  ...MARKER_TOOLS,
   {
     name: 'media_probe', title: 'Probe media',
     description: 'Inspect a media file with ffprobe without importing it or changing the project.',

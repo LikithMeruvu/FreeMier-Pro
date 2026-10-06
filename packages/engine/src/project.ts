@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Project } from '@freemier/shared';
-import { EditorError, PROJECT_SCHEMA_VERSION } from '@freemier/shared';
+import { EditorError, PROJECT_SCHEMA_VERSION, validateMarkers } from '@freemier/shared';
 
 /**
  * Project persistence.
@@ -94,6 +94,7 @@ export function validateProject(value: unknown, source = '<memory>'): Project {
   if (!Array.isArray(p.media)) {
     throw new EditorError('INVALID_ARGUMENT', 'Project is missing a media array', { source });
   }
+  if (timeline.markers !== undefined) validateMarkers(timeline.markers, timeline.fps as number);
 
   return value as Project;
 }

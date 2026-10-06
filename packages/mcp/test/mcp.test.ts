@@ -125,9 +125,9 @@ afterAll(async () => {
 });
 
 describe('MCP protocol', () => {
-  it('initializes and lists all 42 tools with schemas', async () => {
+  it('initializes and lists all 46 tools with schemas', async () => {
     const tools = await client.listTools();
-    expect(tools.length).toBe(42);
+    expect(tools.length).toBe(46);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z_]+$/);
       expect(t.description.length).toBeGreaterThan(10);
@@ -144,6 +144,7 @@ describe('MCP protocol', () => {
       'media_probe', 'media_inspect', 'timeline_at_time', 'timeline_gaps', 'track_inspect',
       'clip_slip', 'clip_roll', 'clip_duplicate', 'keyframe_set', 'keyframe_remove', 'keyframe_list',
       'effect_add', 'effect_update', 'effect_remove', 'effect_list', 'effect_catalog', 'editor_capabilities',
+      'marker_add', 'marker_update', 'marker_remove', 'marker_list',
     ]) {
       expect(names, `missing tool: ${required}`).toContain(required);
     }
@@ -170,6 +171,19 @@ describe('MCP protocol', () => {
 });
 
 describe('agent edit workflow', () => {
+  it('edits, queries, saves and undoes fixed markers through actual stdio', async () => {
+    await client.call('project_create', { name: 'Markers', fps: 30 });
+    const result = await client.call('marker_add', { time: 1.019, label: 'नमस्ते', notes: 'Line 1\nLine 2', color: '#ff0080' });
+    const marker = result.marker as { id: string; time: number }; expect(result.frame).toBe(31); expect(marker.time).toBe(31 / 30);
+    await client.call('marker_update', { markerId: marker.id, label: 'Changed' });
+    const target = path.join(workspace, 'Marker project'); await client.call('project_save', { path: target });
+    await client.call('marker_remove', { markerId: marker.id }); expect((await client.call('marker_list')).markers).toEqual([]);
+    await client.call('undo'); expect(((await client.call('marker_list')).markers as Array<{ label: string }>)[0]?.label).toBe('Changed');
+    await client.call('project_load', { path: target }); expect(((await client.call('marker_list', { start: 1, end: 2 })).markers as Array<{ id: string }>)[0]?.id).toBe(marker.id);
+    const before = (await client.call('project_info')).revision;
+    const bad = await client.request('tools/call', { name: 'marker_update', arguments: { markerId: marker.id, label: '  ' } });
+    expect((bad.result as { isError: boolean }).isError).toBe(true); expect((await client.call('project_info')).revision).toBe(before);
+  });
   it('edits professional primitives, curves and effect CRUD over real stdio', async () => {
     await client.call('project_create', { name: 'Professional', fps: 30, width: 96, height: 64 });
     const media = await client.call('media_import', { path: path.join(FIXTURES, 'clipA.mp4') }), assetId = (media.asset as { id: string }).id;

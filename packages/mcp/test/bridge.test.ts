@@ -72,6 +72,18 @@ describe('LiveBridge', () => {
     expect(body.routes).toContain('/events');
   });
 
+  it('returns confirmed command state with ordered delivery independent of undo snapshot revision', async () => {
+    const before = await (await fetch(`${base}/state`)).json();
+    const call = async (action: string, args: Record<string, unknown> = {}) => (await fetch(`${base}/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json();
+    const added = await call('marker_add', { time: 0, label: 'Confirmed' });
+    expect(added._bridge.eventSequence).toBe(before.eventSequence + 1); expect(added._bridge.eventEpoch).toBe(before.eventEpoch);
+    expect(added._bridge.project.timeline.markers[0].label).toBe('Confirmed'); expect(added._bridge.canUndo).toBe(true);
+    const undone = await call('undo');
+    expect(undone._bridge.revision).toBe(before.revision); expect(undone._bridge.eventSequence).toBe(added._bridge.eventSequence + 1); expect(undone._bridge.canRedo).toBe(true);
+    expect(undone._bridge.project.timeline.markers ?? []).toEqual([]);
+    const repeatedRead = await call('marker_list'); expect(repeatedRead._bridge.eventSequence).toBe(undone._bridge.eventSequence);
+  });
+
   it('streams a snapshot immediately on subscribe', async () => {
     const controller = new AbortController();
     const res = await fetch(`${base}/events`, { signal: controller.signal });

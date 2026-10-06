@@ -2,3 +2,9 @@
 
 .monitor>.panel-head,.monitor-readout,.monitor-scrub,.transport,.source-placement,.preview-note{flex-shrink:0}
 @media(max-height:750px){#layout{min-height:260px}}
+
+.markers-panel{flex:1;overflow:auto;padding:9px}.marker-create{display:flex;flex-direction:column;gap:7px}.marker-policy{font-size:9px;color:#8b8e9b;margin:12px 0}.marker-card{border:1px solid #3c3d45;border-left-width:4px;padding:7px;margin:8px 0;display:grid;grid-template-columns:1fr 28px;gap:6px}.marker-card-head{grid-column:1/-1;display:flex;justify-content:space-between}.marker-card-head button:first-child{font:10px ui-monospace,monospace}.marker-card textarea,.marker-card .control-row{grid-column:1/-1}.marker-card textarea{resize:vertical;font:11px Segoe UI,sans-serif;color:#d4d6df;background:#17181c;border:1px solid #41434b;padding:5px}.marker-card input[type=color]{width:28px;height:29px;padding:2px}
+
+#timeline-area{position:relative}#timeline{position:sticky;left:0;top:0}.timeline-toolbar{overflow-x:auto}.timeline-toolbar>button,.timeline-toolbar>label,#edit-tools{flex-shrink:0}
+
+.panel-tabs button{padding-left:6px;padding-right:6px;font-size:11px}.panel-tabs>.spacer{min-width:0}

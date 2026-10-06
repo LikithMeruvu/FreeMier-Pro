@@ -7,6 +7,7 @@
   "exports": {
     "./animation": { "types": "./dist/animation.d.ts", "default": "./dist/animation.js" },
     "./effects": { "types": "./dist/effects.d.ts", "default": "./dist/effects.js" },
+    "./timecode": { "types": "./dist/timecode.d.ts", "default": "./dist/timecode.js" },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

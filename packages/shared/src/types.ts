@@ -101,6 +101,15 @@ export interface Track {
 }
 
 /** The edit timeline. */
+export interface TimelineMarker {
+  readonly id: Id;
+  /** Fixed sequence time, quantized to the sequence frame grid. */
+  readonly time: number;
+  readonly label: string;
+  readonly color: string;
+  readonly notes: string;
+}
+
 export interface Timeline {
   readonly id: Id;
   readonly name: string;
@@ -108,6 +117,8 @@ export interface Timeline {
   readonly width: number;
   readonly height: number;
   readonly tracks: readonly Track[];
+  /** Optional in legacy schema-1 projects. Markers never extend render duration. */
+  readonly markers?: readonly TimelineMarker[];
 }
 
 /** A project: a timeline plus its media library. */
