@@ -14,6 +14,11 @@ jobs:
       - run: npm run fixtures
       - run: npm run build
       - run: npm test
+      - name: Configure Linux Electron sandbox
+        run: |
+          node node_modules/electron/install.js
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - run: xvfb-run -a npm run test:gui
       - uses: actions/upload-artifact@v4
         if: always()
