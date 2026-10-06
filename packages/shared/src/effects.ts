@@ -45,7 +45,13 @@ export function fadeEnvelope(effect: Effect, localTime: number): number {
 
 /** RGB in 0..255. Mirrors the export compiler; alpha is handled separately. */
 export function applyColorEffect(rgb: readonly number[], type: string, params: Readonly<Record<string, unknown>> = {}): [number, number, number] {
+  return createColorProcessor(type, params)(rgb);
+}
+/** Validate once per frame/stack; returned processor mirrors export RGB math. */
+export function createColorProcessor(type: string, params: Readonly<Record<string, unknown>> = {}): (rgb: readonly number[]) => [number, number, number] {
   const p = validateEffectParams(type, params), clamp = (v: number) => Math.max(0, Math.min(1, v));
+  if (!['color_adjust', 'grayscale', 'sepia'].includes(type)) throw new EditorError('UNSUPPORTED', 'This effect requires spatial processing or a fade envelope', { type });
+  return (rgb) => {
   const [r, g, b] = rgb as readonly [number, number, number];
   if (type === 'color_adjust') {
     // Offset brightness, center contrast, inverse gamma, then Rec.709 saturation.
@@ -58,5 +64,6 @@ export function applyColorEffect(rgb: readonly number[], type: string, params: R
     const amount = Number(p.amount), matrix = [[.393, .769, .189], [.349, .686, .168], [.272, .534, .131]];
     return matrix.map((row, i) => 255 * clamp(((1 - amount) * rgb[i]! + amount * (row[0]! * r + row[1]! * g + row[2]! * b)) / 255)) as [number, number, number];
   }
-  throw new EditorError('UNSUPPORTED', 'This effect requires spatial processing or a fade envelope', { type });
+  throw new EditorError('UNSUPPORTED', 'Unsupported pixel effect', { type });
+  };
 }

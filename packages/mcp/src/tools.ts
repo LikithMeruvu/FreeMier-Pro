@@ -6,7 +6,9 @@ import {
 } from '@freemier/engine';
 import { importMedia, probeMedia, extractThumbnail, extractWaveform, exportProject } from '@freemier/ffmpeg';
 import { timelineDuration } from '@freemier/engine';
-import { saveProject, loadProject } from '@freemier/engine';
+import { saveProject, loadProject, projectDir } from '@freemier/engine';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import { newMediaId, defaultTransform, EditorError } from '@freemier/shared';
 import type { Clip } from '@freemier/shared';
 import { PROFESSIONAL_TOOLS } from './professional-tools.js';
@@ -145,21 +147,37 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'project_save',
     title: 'Save project',
-    description: 'Save the current project to disk. Defaults to <workspace>/project.palmier.',
-    inputSchema: { path: z.string().optional().describe('Destination path (without or with .palmier)') },
+    description: 'Save the current project and copied media to disk. Defaults to <workspace>/project.freemier. Legacy .palmier paths are supported.',
+    inputSchema: { path: z.string().optional().describe('Destination project directory') },
     handler: async (a, ctx) => {
       const target = (a.path as string | undefined) ?? `${ctx.workspace}/project`;
-      const written = await saveProject(ctx.store.project, target);
+      const snapshot = ctx.store.project;
+      const portableMedia = await Promise.all(snapshot.media.map(async (asset) => {
+        if (!asset.copied) return asset;
+        const source = path.isAbsolute(asset.path) ? asset.path : path.resolve(ctx.workspace, 'media', asset.path);
+        const mediaDir = path.join(projectDir(target), 'media'); await fs.mkdir(mediaDir, { recursive: true });
+        const filename = `${asset.id}${path.extname(asset.path)}`;
+        const destination = path.join(mediaDir, filename);
+        if (path.resolve(source) !== path.resolve(destination)) await fs.copyFile(source, destination);
+        return { ...asset, path: filename };
+      }));
+      const written = await saveProject({ ...snapshot, media: portableMedia }, target);
       return ok({ savedTo: written });
     },
   },
   {
     name: 'project_load',
     title: 'Load project',
-    description: 'Load a project from disk, replacing the current one.',
-    inputSchema: { path: z.string().describe('Path to the .palmier project directory') },
+    description: 'Load a .freemier or legacy .palmier project into the owning store.',
+    inputSchema: { path: z.string().describe('Path to the project directory') },
     handler: async (a, ctx) => {
-      const project = await loadProject(a.path as string);
+      const loaded = await loadProject(a.path as string);
+      const media = await Promise.all(loaded.media.map(async (asset) => {
+        if (!asset.copied || path.isAbsolute(asset.path)) return asset;
+        const packaged = path.resolve(projectDir(a.path as string), 'media', asset.path);
+        try { await fs.access(packaged); return { ...asset, path: packaged }; } catch { return asset; }
+      }));
+      const project = { ...loaded, media };
       ctx.store.load(project);
       ctx.notify({ kind: 'project', ids: [project.id] });
       return ok({ id: project.id, name: project.name, mediaCount: project.media.length });

@@ -1,624 +1,442 @@
-/**
- * Renderer.
- *
- * The single most important behaviour here: subscribing to the bridge's SSE
- * stream and re-rendering on every change. That is what makes an agent's edit
- * appear on screen without a reload.
- */
+import { evaluateTransform, evaluateAnimatable, EASINGS } from '@freemier/shared/animation';
+import { EFFECT_CATALOG, createColorProcessor, fadeEnvelope } from '@freemier/shared/effects';
 
-const params = new URLSearchParams(location.search);
-const BRIDGE = `http://127.0.0.1:${params.get('bridge') ?? '4317'}`;
-
-const els = {
-  projectName: document.getElementById('project-name'),
-  liveStatus: document.getElementById('live-status'),
-  liveText: document.getElementById('live-text'),
-  mediaBin: document.getElementById('media-bin'),
-  timeline: document.getElementById('timeline'),
-  revision: document.getElementById('revision'),
-  inspector: document.getElementById('inspector'),
-  stage: document.getElementById('preview-stage'),
-  empty: document.getElementById('preview-empty'),
-  play: document.getElementById('btn-play'),
-  scrub: document.getElementById('scrub'),
-  timecode: document.getElementById('timecode'),
-  import: document.getElementById('btn-import'),
-  exportBtn: document.getElementById('btn-export'),
-  toast: document.getElementById('toast'),
-};
-
-/** Latest project state pushed from the bridge. */
-let project = null;
-let revision = -1;
-let playhead = 0;
-let playing = false;
-let selectedClipId = null;
-
-/** Each clip needs its own decoder, including clips sharing one source. */
-const videoCache = new Map();
-/** Cache of thumbnail blob URLs keyed by asset id. */
-const thumbCache = new Map();
-const pendingThumbs = new Map();
-const waveformCache = new Map();
-
-// ---------------------------------------------------------------- utilities
-
-function toast(message, kind = '') {
-  els.toast.textContent = message;
-  els.toast.className = `toast show ${kind}`;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { els.toast.className = 'toast'; }, 3200);
+const BRIDGE = 'http://127.0.0.1:' + (new URLSearchParams(location.search).get('bridge') ?? '4317');
+const api = window.freemier ?? window.palmier;
+const $ = (id) => document.getElementById(id);
+let project = null, revision = -1, playhead = 0, playing = false, selectedClipId = null;
+let workspace = 'edit', browser = 'project', tool = 'select', snap = true, pps = 90, grid = true;
+let sourceAssetId = null, sourceHead = 0, sourceIn = 0, sourceOut = 0, sourcePlaying = false, sourceEl = null;
+let targetTrackId = null, sourceFocused = false, audioContext = null, applying = false;
+const decoders = new Map(), thumbs = new Map(), pendingThumbs = new Map(), waveforms = new Map();
+const pixelProcessors = new Map(), scratch = document.createElement('canvas'), scratch2 = document.createElement('canvas');
+const program = $('program-canvas'), programCtx = program.getContext('2d', { willReadFrequently: true });
+const canvas = $('timeline'), ctx = canvas.getContext('2d');
+const TRACK_H = 62, RULER_H = 28;
+const fps = () => project?.timeline.fps ?? 30;
+const q = (t) => Math.round(t * fps()) / fps();
+const tracks = () => [...(project?.timeline.tracks ?? [])].sort((a, b) => b.order - a.order);
+const duration = () => Math.max(0, ...(project?.timeline.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)) ?? []));
+const find = (id = selectedClipId) => { for (const track of project?.timeline.tracks ?? []) { const clip = track.clips.find((c) => c.id === id); if (clip) return { track, clip }; } return null; };
+const assetFor = (clip) => project?.media.find((m) => m.id === clip.assetId);
+const mediaUrl = (asset) => BRIDGE + '/media/' + encodeURIComponent(asset.id);
+const local = (clip) => Math.max(0, Math.min(clip.duration, playhead - clip.start));
+function tc(seconds, rate = fps()) {
+  const nominal = Math.round(rate), frame = Math.max(0, Math.floor(seconds * rate + 1e-5));
+  const values = [Math.floor(frame / nominal / 3600), Math.floor(frame / nominal / 60) % 60, Math.floor(frame / nominal) % 60, frame % nominal];
+  return values.map((n) => String(n).padStart(2, '0')).join(':');
 }
-
-function fmt(seconds) {
-  const s = Math.max(0, seconds);
-  const mm = String(Math.floor(s / 60)).padStart(2, '0');
-  const ss = String(Math.floor(s % 60)).padStart(2, '0');
-  const cs = String(Math.floor((s % 1) * 100)).padStart(2, '0');
-  return `${mm}:${ss}.${cs}`;
-}
-
-function timelineDuration() {
-  if (!project) return 0;
-  let max = 0;
-  for (const track of project.timeline.tracks) {
-    for (const clip of track.clips) max = Math.max(max, clip.start + clip.duration);
-  }
-  return max;
-}
-
-function assetFor(clip) {
-  return project?.media.find((m) => m.id === clip.assetId) ?? null;
-}
-
-function selectedClip() {
-  if (!project || !selectedClipId) return null;
-  for (const track of project.timeline.tracks) {
-    const clip = track.clips.find((c) => c.id === selectedClipId);
-    if (clip) return { clip, track };
-  }
-  return null;
-}
-
-/** Resolve a media asset's absolute path (copied assets live under workspace/media). */
-function assetUrl(asset) {
-  if (!asset) return null;
-  const p = asset.path.replace(/\\/g, '/');
-  const absolute = p.startsWith('/') || /^[A-Za-z]:/.test(p) ? p : `${workspaceDir}/${asset.copied ? 'media/' : ''}${p}`;
-  const normalized = absolute.replace(/\\/g, '/');
-  const encoded = encodeURI(normalized).replace(/#/g, '%23').replace(/\?/g, '%3F');
-  return `file://${normalized.startsWith('/') ? '' : '/'}${encoded}`;
-}
-
-let workspaceDir = '';
-let mode = 'standalone';
-
-// ------------------------------------------------------------- live syncing
-
-function setLive(state, text) {
-  els.liveStatus.className = `live-status ${state}`;
-  els.liveText.textContent = text;
-}
-
-function connect() {
-  const source = new EventSource(`${BRIDGE}/events`);
-
-  source.addEventListener('open', () => setLive('on', 'live'));
-
-  source.onmessage = (event) => {
-    let payload;
-    try { payload = JSON.parse(event.data); } catch { return; }
-    if (payload.type === 'snapshot' || payload.type === 'change') {
-      applyState(payload.state.project ?? payload.state, payload.revision ?? payload.state.revision);
-      if (payload.type === 'change') setLive('on', `live · ${payload.kind}`);
-    } else if (payload.type === 'export-progress') {
-      showExportProgress(payload.fraction);
-    }
-  };
-
-  source.onerror = () => {
-    setLive('off', 'reconnecting…');
-    // EventSource retries automatically; nothing to do here.
-  };
-}
-
-function applyState(next, nextRevision = next?.revision) {
-  if (!next || !next.timeline) return;
-  project = next;
-  revision = nextRevision ?? revision;
-  playhead = Math.min(playhead, timelineDuration());
-  els.projectName.textContent = next.name ?? 'Untitled Project';
-  els.revision.textContent = `rev ${revision}`;
-  renderMediaBin();
-  renderTimeline();
-  renderInspector();
-  syncPreview();
-  updateTransport();
-  reportRenderedState();
-}
-
-/**
- * Report what was actually rendered. This is how an automated check confirms
- * that an agent's edit reached the screen, not merely the store.
- */
-function reportRenderedState() {
+function toast(message, kind = '') { $('toast').textContent = message; $('toast').className = 'toast show ' + kind; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').className = 'toast', 3200); }
+function node(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
+function button(text, title, onClick, cls = '') { const el = node('button', cls, text); el.title = title; el.addEventListener('click', onClick); return el; }
+async function command(action, args = {}) {
   try {
-    window.palmier?.reportState?.({
-      revision,
-      projectName: project?.name ?? null,
-      mediaCount: project?.media?.length ?? 0,
-      clipCount: (project?.timeline?.tracks ?? []).reduce((n, t) => n + t.clips.length, 0),
-      trackCount: project?.timeline?.tracks?.length ?? 0,
-      duration: timelineDuration(),
-      mediaItemsRendered: els.mediaBin.querySelectorAll('.media-item').length,
-      previewVideos: els.stage.querySelectorAll('video').length,
-      lastRenderedAt: Date.now(),
-    });
-  } catch { /* reporting must never break rendering */ }
+    const result = await (await fetch(BRIDGE + '/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json();
+    if (!result.ok) throw new Error(result.error?.message ?? 'Command failed');
+    return result;
+  } catch (error) { toast(error.message, 'error'); return null; }
+}
+function setHead(t, inspector = true) { playhead = q(Math.max(0, Math.min(duration(), t))); updateTransport(); syncPreview(); renderTimeline(); if (inspector) renderInspector(); }
+function select(id) { selectedClipId = id; renderInspector(); renderTimeline(); }
+function applyState(next, nextRevision, history = {}) {
+  if (!next?.timeline) return;
+  const replace = project?.id !== next.id;
+  project = next; revision = nextRevision ?? revision;
+  if (replace) { selectedClipId = null; playhead = 0; playing = false; sourcePlaying = false; sourceAssetId = null; sourceEl?.pause?.(); $('source-stage').querySelectorAll('video,audio,img').forEach((el) => el.remove()); sourceEl = null; thumbs.clear(); pendingThumbs.clear(); waveforms.clear(); }
+  playhead = Math.min(playhead, duration());
+  if (!find()) selectedClipId = null;
+  $('project-name').textContent = next.name; $('sequence-name').textContent = next.timeline.name ?? 'Sequence';
+  $('project-format').textContent = next.timeline.width + ' × ' + next.timeline.height + ' · ' + next.timeline.fps + ' fps';
+  $('revision').textContent = 'rev ' + revision;
+  $('btn-undo').disabled = history.canUndo === false; $('btn-redo').disabled = history.canRedo === false;
+  renderMediaBin(); renderTrackHeaders(); renderTimeline(); renderInspector(); syncPreview(); updateTransport(); updateSource(); report();
+}
+function report() {
+  api?.reportState?.({ revision, projectName: project?.name, mediaCount: project?.media.length ?? 0, clipCount: project?.timeline.tracks.reduce((n, t) => n + t.clips.length, 0) ?? 0, trackCount: project?.timeline.tracks.length ?? 0, duration: duration(), mediaItemsRendered: $('media-bin').querySelectorAll('.media-item').length, previewVideos: $('preview-stage').querySelectorAll('video').length, lastRenderedAt: Date.now() });
+}
+function connect() {
+  const source = new EventSource(BRIDGE + '/events');
+  source.onopen = () => { $('live-status').className = 'live-status on'; $('live-text').textContent = 'Live MCP'; };
+  source.onerror = () => { $('live-status').className = 'live-status off'; $('live-text').textContent = 'Reconnecting'; };
+  source.onmessage = ({ data }) => {
+    let event; try { event = JSON.parse(data); } catch { return; }
+    // SSE is ordered. Undo restores an earlier snapshot revision and must repaint.
+    if (event.type === 'snapshot' || event.type === 'change') applyState(event.state.project ?? event.state, event.revision, event.state);
+    else if (event.type === 'export-progress') showProgress(event.fraction);
+  };
 }
 
-// -------------------------------------------------------------- media bin
-
+// Project bin and source monitor stay independent of sequence selection.
 function renderMediaBin() {
   if (!project) return;
-  const media = project.media ?? [];
-  if (media.length === 0) {
-    els.mediaBin.innerHTML = '<div class="empty">No media yet — import a file or let the agent add one.</div>';
-    return;
-  }
-
-  els.mediaBin.replaceChildren(...media.map((asset) => {
-    const row = document.createElement('div');
-    row.className = 'media-item';
-
-    const img = document.createElement('img');
-    img.className = 'media-thumb';
-    if (thumbCache.has(asset.id)) {
-      img.src = thumbCache.get(asset.id);
-    } else {
-      loadThumbnail(asset, img);
-    }
-
-    const meta = document.createElement('div');
-    meta.className = 'media-meta';
-    const name = document.createElement('div');
-    name.className = 'media-name';
-    name.textContent = asset.name;
-    name.title = asset.path;
-    const sub = document.createElement('div');
-    sub.className = 'media-sub';
-    sub.textContent = `${asset.kind} · ${fmt(asset.duration)}${asset.width ? ` · ${asset.width}×${asset.height}` : ''}`;
-    meta.append(name, sub);
-
-    row.append(img, meta);
-    return row;
+  const query = $('bin-search').value.toLowerCase();
+  $('media-bin').hidden = browser !== 'project'; $('effects-browser').hidden = browser !== 'effects';
+  $('bin-search').placeholder = browser === 'project' ? 'Search media' : 'Search effects';
+  $('bin-search').setAttribute('aria-label', $('bin-search').placeholder);
+  $('media-bin').className = 'media-bin ' + (grid ? 'grid' : 'list');
+  const assets = project.media.filter((a) => a.name.toLowerCase().includes(query));
+  $('bin-count').textContent = (browser === 'project' ? assets.length : EFFECT_CATALOG.filter((e) => e.name.toLowerCase().includes(query)).length) + ' items';
+  $('media-bin').replaceChildren(...assets.map((asset) => {
+    const item = node('div', 'media-item' + (asset.id === sourceAssetId ? ' selected' : '')); item.dataset.assetId = asset.id; item.draggable = true; item.tabIndex = 0;
+    const img = node('img', 'media-thumb'); img.alt = asset.name; if (thumbs.has(asset.id)) img.src = thumbs.get(asset.id); else void thumbnail(asset, img);
+    const meta = node('div', 'media-meta'); meta.append(node('div', 'media-name', asset.name), node('div', 'media-sub', tc(asset.duration) + ' · ' + asset.kind.toUpperCase()));
+    item.append(img, meta); item.addEventListener('dblclick', () => openSource(asset.id)); item.addEventListener('keydown', (e) => { if (e.key === 'Enter') openSource(asset.id); });
+    item.addEventListener('dragstart', (e) => { e.dataTransfer.setData('application/x-freemier-asset', asset.id); e.dataTransfer.setData('text/plain', asset.id); e.dataTransfer.effectAllowed = 'copy'; }); return item;
   }));
-}
-
-/** Ask the main process for a poster frame; fall back to a blank tile. */
-async function loadThumbnail(asset, img) {
-  try {
-    const url = assetUrl(asset);
-    if (!url) return;
-    if (asset.kind === 'image') { img.src = url; thumbCache.set(asset.id, url); return; }
-    if (asset.kind === 'audio') return;
-    if (!pendingThumbs.has(asset.id)) pendingThumbs.set(asset.id, fetch(`${BRIDGE}/thumbnail`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }),
-    }).then((r) => r.json()));
-    const poster = await pendingThumbs.get(asset.id);
-    if (poster.ok) { thumbCache.set(asset.id, poster.dataUrl); img.src = poster.dataUrl; }
-  } catch { /* leave the blank tile */ }
-}
-
-// --------------------------------------------------------------- timeline
-
-const canvas = els.timeline;
-const ctx = canvas.getContext('2d');
-
-const TRACK_H = 46;
-const RULER_H = 22;
-const HEADER_W = 54;
-
-function renderTimeline() {
-  if (!project) return;
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  const W = rect.width;
-  const H = rect.height;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#16181f';
-  ctx.fillRect(0, 0, W, H);
-
-  const tracks = project.timeline.tracks;
-  canvas.dataset.waveformPeaks = String([...waveformCache.values()].reduce((n, peaks) => n + peaks.length, 0));
-  const duration = Math.max(timelineDuration(), 1);
-  const laneW = W - HEADER_W;
-
-  const xOf = (t) => HEADER_W + (t / duration) * laneW;
-  const tOf = (x) => ((x - HEADER_W) / laneW) * duration;
-  canvas._xOf = xOf; canvas._tOf = tOf;
-
-  // Ruler
-  ctx.fillStyle = '#1c1f28';
-  ctx.fillRect(0, 0, W, RULER_H);
-  ctx.strokeStyle = '#262a35';
-  ctx.beginPath(); ctx.moveTo(0, RULER_H + .5); ctx.lineTo(W, RULER_H + .5); ctx.stroke();
-
-  const step = niceStep(duration);
-  ctx.fillStyle = '#8a90a2';
-  ctx.font = '10px ui-monospace, monospace';
-  ctx.textBaseline = 'middle';
-  for (let t = 0; t <= duration; t += step) {
-    const x = xOf(t);
-    ctx.strokeStyle = '#2a2f3b';
-    ctx.beginPath(); ctx.moveTo(x, RULER_H); ctx.lineTo(x, H); ctx.stroke();
-    ctx.fillText(fmt(t).slice(0, 5), x + 3, RULER_H / 2);
-  }
-
-  // Tracks (draw bottom-up so higher order appears on top)
-  [...tracks].sort((a, b) => b.order - a.order).forEach((track, i) => {
-    const y = RULER_H + i * TRACK_H;
-    ctx.fillStyle = track.kind === 'video' ? '#191d27' : '#181f1d';
-    ctx.fillRect(HEADER_W, y, laneW, TRACK_H - 2);
-
-    ctx.fillStyle = '#8a90a2';
-    ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
-    ctx.fillText(track.name, 10, y + TRACK_H / 2);
-
-    for (const clip of track.clips) {
-      const cx = xOf(clip.start);
-      const cw = Math.max(2, xOf(clip.start + clip.duration) - cx);
-      const cy = y + 4;
-      const ch = TRACK_H - 10;
-      const isSel = clip.id === selectedClipId;
-
-      ctx.fillStyle = isSel ? '#6ea8fe' : (track.kind === 'video' ? '#3b6ea5' : '#3f7a68');
-      roundRect(ctx, cx, cy, cw, ch, 4);
-      ctx.fill();
-
-      if (track.kind === 'audio') {
-        const asset = assetFor(clip);
-        if (asset?.hasAudio && !waveformCache.has(asset.id)) {
-          waveformCache.set(asset.id, []);
-          fetch(`${BRIDGE}/waveform`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }) })
-            .then((r) => r.json()).then((body) => { if (body.ok) waveformCache.set(asset.id, body.peaks); renderTimeline(); }).catch(() => {});
-        }
-        const peaks = waveformCache.get(asset?.id) ?? [];
-        ctx.strokeStyle = 'rgba(255,255,255,.28)';
-        ctx.beginPath();
-        for (let px = cx + 2; px < cx + cw - 2; px += 3) {
-          const sourceTime = clip.sourceIn + ((px - cx) / cw) * clip.duration;
-          const peak = peaks[Math.min(peaks.length - 1, Math.floor((sourceTime / (asset?.duration || 1)) * peaks.length))] ?? 0;
-          const h = peak * Math.min(1, clip.volume) * (ch - 10);
-          ctx.moveTo(px, cy + ch / 2 - h / 2);
-          ctx.lineTo(px, cy + ch / 2 + h / 2);
-        }
-        ctx.stroke();
-      }
-
-      if (cw > 46) {
-        ctx.fillStyle = isSel ? '#0b1420' : '#dfe6f5';
-        ctx.font = '10px -apple-system, "Segoe UI", sans-serif';
-        const label = clip.label ?? assetFor(clip)?.name ?? 'clip';
-        ctx.save();
-        ctx.beginPath(); ctx.rect(cx + 4, cy, cw - 8, ch); ctx.clip();
-        ctx.fillText(label, cx + 6, cy + ch / 2);
-        ctx.restore();
-      }
+  if (!assets.length) $('media-bin').append(node('div', 'empty', 'Import media to begin. Double-click a tile to inspect its source; drag it onto a track to edit.'));
+  $('effects-browser').replaceChildren();
+  for (const kind of ['video', 'audio']) {
+    const matches = EFFECT_CATALOG.filter((e) => e.media === kind && e.name.toLowerCase().includes(query));
+    if (!matches.length) continue;
+    $('effects-browser').append(node('div', 'effect-category', kind + ' effects'));
+    for (const effect of matches) {
+      const tile = button('', 'Add ' + effect.name + ' to the selected matching clip', () => addSelectedEffect(effect.type), 'effect-tile'); tile.dataset.effectType = effect.type;
+      const label = node('div', '', effect.name); label.append(node('small', '', effect.preview === 'envelope' ? 'Clip-local envelope' : effect.type === 'blur' || effect.type === 'sharpen' ? 'CPU · spatial preview approximation' : 'CPU · shared RGB processing'));
+      tile.append(node('span', 'effect-icon', 'fx'), label); $('effects-browser').append(tile);
     }
-  });
-
-  // Playhead
-  const px = xOf(playhead);
-  ctx.strokeStyle = '#f0a35e';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(px, RULER_H); ctx.lineTo(px, H); ctx.stroke();
-  ctx.fillStyle = '#f0a35e';
-  ctx.beginPath();
-  ctx.moveTo(px - 5, RULER_H); ctx.lineTo(px + 5, RULER_H); ctx.lineTo(px, RULER_H + 8);
-  ctx.closePath(); ctx.fill();
-  ctx.lineWidth = 1;
-}
-
-function niceStep(duration) {
-  const raw = duration / 8;
-  const pow = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 0.001))));
-  for (const m of [1, 2, 5, 10]) {
-    if (pow * m >= raw) return pow * m;
   }
-  return pow * 10;
+}
+async function thumbnail(asset, img) {
+  try {
+    if (asset.kind === 'audio') return;
+    if (asset.kind === 'image') { img.crossOrigin = 'anonymous'; img.src = mediaUrl(asset); thumbs.set(asset.id, img.src); return; }
+    if (!pendingThumbs.has(asset.id)) pendingThumbs.set(asset.id, fetch(BRIDGE + '/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }) }).then((r) => r.json()));
+    const result = await pendingThumbs.get(asset.id); if (result.ok) { thumbs.set(asset.id, result.dataUrl); img.src = result.dataUrl; }
+  } catch {}
+}
+function openSource(id) {
+  const asset = project?.media.find((a) => a.id === id); if (!asset) return;
+  sourceEl?.pause?.(); $('source-stage').querySelectorAll('video,audio,img').forEach((el) => el.remove());
+  sourceAssetId = id; sourceHead = sourceIn = 0; sourceOut = asset.duration; sourcePlaying = false;
+  sourceEl = node(asset.kind === 'image' ? 'img' : asset.kind === 'audio' ? 'audio' : 'video'); sourceEl.crossOrigin = 'anonymous'; sourceEl.src = mediaUrl(asset); sourceEl.preload = 'auto';
+  sourceEl.dataset.assetId = id; sourceEl.addEventListener('loadeddata', updateSource); sourceEl.addEventListener('load', updateSource); $('source-stage').append(sourceEl);
+  sourceFocused = true; renderMediaBin(); updateSource();
+}
+function updateSource() {
+  const asset = project?.media.find((a) => a.id === sourceAssetId);
+  $('source-empty').hidden = !!asset; $('source-name').textContent = asset?.name ?? 'No selection'; $('source-timecode').textContent = tc(sourceHead);
+  $('source-range').textContent = asset ? 'I ' + tc(sourceIn) + ' · O ' + tc(sourceOut) : 'No in / out';
+  $('source-scrub').value = String(asset?.duration ? sourceHead / asset.duration * 1000 : 0); $('source-play').textContent = sourcePlaying ? '❚❚' : '▶';
+  if (asset && sourceEl && asset.kind !== 'image') {
+    if (Math.abs(sourceEl.currentTime - sourceHead) > (sourcePlaying ? .12 : .001)) try { sourceEl.currentTime = sourceHead; } catch {}
+    if (sourcePlaying) sourceEl.play().catch(() => {}); else sourceEl.pause();
+  }
+}
+function sourceSeek(t) { const asset = project?.media.find((a) => a.id === sourceAssetId); if (!asset) return; sourceHead = q(Math.max(0, Math.min(asset.duration, t))); updateSource(); }
+async function placeSource() {
+  const asset = project?.media.find((a) => a.id === sourceAssetId), trackId = $('source-track').value;
+  if (!asset) { toast('Open a source first', 'error'); return; }
+  const mode = $('source-placement').value, args = { assetId: asset.id, trackId, sourceIn, duration: sourceOut - sourceIn, strict: mode === 'strict', ripple: mode === 'ripple' };
+  if (mode !== 'append') args.start = playhead;
+  const result = await command('clip_add', args); if (result) { select(result.clip.id); setHead(result.clip.start); toast('Placed ' + asset.name); }
 }
 
-function roundRect(c, x, y, w, h, r) {
-  const radius = Math.min(r, h / 2, w / 2);
-  c.beginPath();
-  c.moveTo(x + radius, y);
-  c.arcTo(x + w, y, x + w, y + h, radius);
-  c.arcTo(x + w, y + h, x, y + h, radius);
-  c.arcTo(x, y + h, x, y, radius);
-  c.arcTo(x, y, x + w, y, radius);
-  c.closePath();
+// Actual media decoders + Web Audio gain, with one decoder per clip.
+function audioBus(el) {
+  audioContext ??= new AudioContext(); const source = audioContext.createMediaElementSource(el), gain = audioContext.createGain(), analyser = audioContext.createAnalyser();
+  analyser.fftSize = 256; source.connect(gain); gain.connect(analyser); analyser.connect(audioContext.destination); return { source, gain, analyser };
 }
-
-// ---------------------------------------------------------------- preview
-
+function discard(entry) { if (entry.frameRequest !== undefined) entry.el.cancelVideoFrameCallback(entry.frameRequest); entry.el.pause?.(); entry.el.remove(); entry.source?.disconnect(); entry.gain?.disconnect(); entry.analyser?.disconnect(); }
 function syncPreview() {
   if (!project) return;
-  const active = clipsAt(playhead);
-  const wanted = new Set(active.map((c) => c.id));
-
-  // Remove elements for clips no longer under the playhead.
-  for (const [clipId, el] of videoCache) {
-    if (!wanted.has(clipId)) { if (el.pause) el.pause(); el.remove(); videoCache.delete(clipId); }
-  }
-
-  if (active.length === 0) {
-    els.empty.style.display = '';
-    return;
-  }
-  els.empty.style.display = 'none';
-
-  for (const clip of active) {
-    let el = videoCache.get(clip.id);
-    const asset = assetFor(clip);
+  const active = [];
+  for (const track of [...project.timeline.tracks].sort((a, b) => a.order - b.order)) if (!track.muted) for (const clip of track.clips) if (playhead >= clip.start - 1e-6 && playhead < clip.start + clip.duration - 1e-6) active.push({ clip, track, asset: assetFor(clip) });
+  const wanted = new Set(active.map(({ clip }) => clip.id));
+  for (const [id, entry] of decoders) if (!wanted.has(id)) { discard(entry); decoders.delete(id); }
+  for (const { clip, track, asset } of active) {
     if (!asset) continue;
-    const track = project.timeline.tracks.find((t) => t.clips.some((c) => c.id === clip.id));
-    if (!el) {
-      el = document.createElement(asset.kind === 'image' ? 'img' : track.kind === 'audio' || asset.kind === 'audio' ? 'audio' : 'video');
-      el.src = assetUrl(asset);
-      el.dataset.clipId = clip.id;
-      // Audio is mixed from audio tracks, matching the export pipeline.
-      el.muted = track.kind === 'video';
-      el.preload = 'auto';
-      el.addEventListener('loadeddata', () => { syncPreview(); reportRenderedState(); });
-      els.stage.appendChild(el);
-      videoCache.set(clip.id, el);
+    const tag = asset.kind === 'image' ? 'IMG' : track.kind === 'audio' || asset.kind === 'audio' ? 'AUDIO' : 'VIDEO';
+    let entry = decoders.get(clip.id);
+    if (entry && (entry.el.tagName !== tag || entry.el.src !== mediaUrl(asset))) { discard(entry); decoders.delete(clip.id); entry = null; }
+    if (!entry) {
+      const el = node(tag.toLowerCase()); el.crossOrigin = 'anonymous'; el.src = mediaUrl(asset); el.dataset.clipId = clip.id; el.preload = 'auto'; el.muted = track.kind === 'video'; el.volume = 1;
+      entry = { el, ...(tag === 'AUDIO' && asset.hasAudio ? audioBus(el) : {}) }; decoders.set(clip.id, entry); $('preview-stage').append(el);
+      el.addEventListener('loadeddata', () => { drawProgram(); report(); }); el.addEventListener('seeked', drawProgram); el.addEventListener('load', drawProgram);
+      if (tag === 'VIDEO') {
+        const presented = () => {
+          if (decoders.get(clip.id) !== entry) return;
+          drawProgram(); entry.frameRequest = el.requestVideoFrameCallback(presented);
+        };
+        entry.frameRequest = el.requestVideoFrameCallback(presented);
+      }
     }
-
-    // Map timeline time to source time, honouring the clip's in-point.
-    const sourceTime = clip.sourceIn + (playhead - clip.start);
-    if (asset.kind !== 'image' && Math.abs((el.currentTime ?? 0) - sourceTime) > 0.12) {
-      try { el.currentTime = Math.max(0, sourceTime); } catch { /* not seekable yet */ }
-    }
-
-    const t = clip.transform;
-    const outputWidth = Math.min(els.stage.clientWidth, els.stage.clientHeight * project.timeline.width / project.timeline.height);
-    const outputHeight = outputWidth * project.timeline.height / project.timeline.width;
-    if (el.tagName !== 'AUDIO') { el.style.width = `${outputWidth}px`; el.style.height = `${outputHeight}px`; el.style.objectFit = 'contain'; }
-    const scale = t.scale.value;
-    const dx = (t.x.value * outputWidth);
-    const dy = (t.y.value * outputHeight);
-    el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale}) rotate(${t.rotation.value}deg)`;
-    el.style.opacity = String(t.opacity.value);
-    el.volume = Math.min(1, Math.max(0, clip.volume));
-    el.style.zIndex = String(track.order);
-
-    if (el.play) { if (playing) { el.play().catch(() => {}); } else { el.pause(); } }
+    const sourceTime = clip.sourceIn + playhead - clip.start, el = entry.el;
+    if (tag !== 'IMG' && Math.abs(el.currentTime - sourceTime) > (playing ? .12 : .001)) try { el.currentTime = Math.max(0, sourceTime); } catch {}
+    const transform = evaluateTransform(clip.transform, local(clip)); el.dataset.transform = JSON.stringify(transform);
+    el.style.transform = 'translate(' + transform.x * program.width + 'px, ' + transform.y * program.height + 'px) scale(' + transform.scale + ') rotate(' + transform.rotation + 'deg)';
+    el.style.opacity = String(transform.opacity);
+    let gain = clip.volume; for (const effect of clip.effects) if (effect.enabled && effect.type === 'audio_fade') gain *= fadeEnvelope(effect, local(clip));
+    if (entry.gain) { entry.gain.gain.value = gain; el.dataset.gain = String(gain); }
+    if (tag !== 'IMG') { if (playing) el.play().catch(() => {}); else el.pause(); }
   }
+  $('preview-stage').dataset.activeClips = String(active.length); $('preview-empty').hidden = active.some((a) => a.track.kind === 'video' && a.asset?.kind !== 'audio');
+  drawProgram();
+}
+function spatialSharpen(context, width, height, amount) {
+  const image = context.getImageData(0, 0, width, height), data = image.data, original = new Uint8ClampedArray(data), kernel = [1, 4, 6, 4, 1];
+  // Real spatial processing; RGB kernel approximation of export's luma unsharp.
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) for (let channel = 0; channel < 3; channel++) {
+    let blurred = 0;
+    for (let ky = -2; ky <= 2; ky++) for (let kx = -2; kx <= 2; kx++) { const sx = Math.max(0, Math.min(width - 1, x + kx)), sy = Math.max(0, Math.min(height - 1, y + ky)); blurred += original[(sy * width + sx) * 4 + channel] * kernel[kx + 2] * kernel[ky + 2] / 256; }
+    const index = (y * width + x) * 4 + channel; data[index] = original[index] + amount * (original[index] - blurred);
+  }
+  context.putImageData(image, 0, 0);
+}
+function drawProgram() {
+  if (!project || applying) return;
+  applying = true;
+  try {
+    const stage = $('preview-stage'), aspect = project.timeline.width / project.timeline.height;
+    const width = Math.max(2, Math.round(Math.min(stage.clientWidth, stage.clientHeight * aspect))), height = Math.max(2, Math.round(width / aspect));
+    if (program.width !== width || program.height !== height) { program.width = scratch.width = scratch2.width = width; program.height = scratch.height = scratch2.height = height; }
+    programCtx.fillStyle = '#000'; programCtx.fillRect(0, 0, width, height);
+    const sc = scratch.getContext('2d', { willReadFrequently: true }), aux = scratch2.getContext('2d');
+    let approximation = false, unknown = false;
+    for (const track of [...project.timeline.tracks].sort((a, b) => a.order - b.order)) if (track.kind === 'video' && !track.muted) for (const clip of track.clips) {
+      const el = decoders.get(clip.id)?.el, asset = assetFor(clip); if (!el || !asset || el.tagName === 'AUDIO' || (el.tagName === 'VIDEO' ? el.readyState < 2 : !el.complete)) continue;
+      sc.clearRect(0, 0, width, height); const iw = el.videoWidth || el.naturalWidth, ih = el.videoHeight || el.naturalHeight; if (!iw || !ih) continue;
+      const fit = Math.min(width / iw, height / ih); sc.drawImage(el, (width - iw * fit) / 2, (height - ih * fit) / 2, iw * fit, ih * fit);
+      let envelope = 1;
+      for (const effect of clip.effects) {
+        if (!effect.enabled) continue;
+        if (['color_adjust', 'grayscale', 'sepia'].includes(effect.type)) {
+          const cacheKey = effect.type + JSON.stringify(effect.params); if (!pixelProcessors.has(cacheKey)) { if (pixelProcessors.size > 100) pixelProcessors.clear(); pixelProcessors.set(cacheKey, createColorProcessor(effect.type, effect.params)); }
+          const process = pixelProcessors.get(cacheKey), image = sc.getImageData(0, 0, width, height), data = image.data;
+          for (let i = 0; i < data.length; i += 4) { const rgb = process([data[i], data[i + 1], data[i + 2]]); data[i] = rgb[0]; data[i + 1] = rgb[1]; data[i + 2] = rgb[2]; }
+          sc.putImageData(image, 0, 0);
+        } else if (effect.type === 'blur') { approximation = true; aux.clearRect(0, 0, width, height); aux.filter = 'blur(' + Number(effect.params.radius) * width / project.timeline.width + 'px)'; aux.drawImage(scratch, 0, 0); aux.filter = 'none'; sc.clearRect(0, 0, width, height); sc.drawImage(scratch2, 0, 0); }
+        else if (effect.type === 'sharpen') { approximation = true; spatialSharpen(sc, width, height, Number(effect.params.amount)); }
+        else if (effect.type === 'video_fade') envelope *= fadeEnvelope(effect, local(clip));
+        else if (effect.type !== 'audio_fade') unknown = true;
+      }
+      const t = evaluateTransform(clip.transform, local(clip)); programCtx.save(); programCtx.globalAlpha = t.opacity * envelope;
+      programCtx.translate(width / 2 + t.x * width, height / 2 + t.y * height); programCtx.rotate(t.rotation * Math.PI / 180); programCtx.scale(t.scale, t.scale);
+      programCtx.drawImage(scratch, -width / 2, -height / 2); programCtx.restore();
+    }
+    $('preview-quality').textContent = approximation ? 'Spatial approximation' : 'Shared CPU preview';
+    $('preview-note').textContent = unknown ? 'Unsupported enabled effect: export will refuse this stack.' : approximation ? 'Blur uses browser Gaussian; sharpen uses RGB spatial processing. Export uses FFmpeg kernels.' : 'Shared RGB, clip-local keyframes & fade envelopes · AV tracks are separate';
+  } catch (error) { $('preview-note').textContent = 'Preview error: ' + error.message; }
+  finally { applying = false; }
 }
 
-/** Clips covering a timeline instant, across all unmuted, visible tracks. */
-function clipsAt(time) {
-  const out = [];
-  if (!project) return out;
-  for (const track of project.timeline.tracks) {
-    if (track.muted) continue;
-    for (const clip of track.clips) {
-      if (time >= clip.start - 1e-6 && time < clip.start + clip.duration - 1e-6) out.push(clip);
-    }
-  }
-  return out;
+// Inspector edits are commits through validated bridge contracts, never local project mutations.
+function heading(text) { const el = node('div', 'section-label', text); $('inspector').append(el); return el; }
+function numericControl(parent, label, value, min, max, step, commit, extra) {
+  const row = node('div', 'control-row'), name = node('label', '', label), input = node('input'); input.type = 'number'; input.min = min; input.max = max; input.step = step; input.value = Number(value.toFixed(4)); input.setAttribute('aria-label', label);
+  input.addEventListener('change', () => commit(Number(input.value))); row.append(name, input); if (extra) row.append(extra); parent.append(row); return input;
 }
-
-// -------------------------------------------------------------- inspector
-
+async function addSelectedEffect(type) {
+  const sel = find(); if (!sel) { toast('Select a clip to add an effect', 'error'); return; }
+  const descriptor = EFFECT_CATALOG.find((e) => e.type === type), params = {};
+  if (type.endsWith('_fade')) params.duration = Math.min(1, sel.clip.duration);
+  if (descriptor?.media !== sel.track.kind) { toast('Select a ' + descriptor?.media + ' clip on a ' + descriptor?.media + ' track', 'error'); return; }
+  await command('effect_add', { clipId: sel.clip.id, type, params });
+}
 function renderInspector() {
-  const sel = selectedClip();
-  if (!sel) {
-    els.inspector.innerHTML = '<div class="empty">Select a clip to edit it.</div>';
-    return;
+  const panel = $('inspector'); panel.replaceChildren(); const sel = find();
+  $('inspector-title').textContent = workspace === 'color' ? 'Color controls' : workspace === 'audio' ? 'Audio mix' : 'Effect controls';
+  $('selection-kind').textContent = sel?.track.kind.toUpperCase() ?? 'SEQUENCE';
+  $('selection-info').textContent = sel ? (sel.clip.label ?? assetFor(sel.clip)?.name ?? 'Clip') + ' · ' + tc(sel.clip.duration) : 'No clip selected';
+  if (!sel) { panel.append(node('div', 'empty', 'Select a timeline clip. Every control edits the same project as your MCP client.')); return; }
+  const { clip, track } = sel, time = local(clip);
+  panel.append(node('div', 'selection-heading', clip.label ?? assetFor(clip)?.name ?? 'Clip'), node('div', 'clip-summary', track.name + ' · ' + tc(clip.start) + ' → ' + tc(clip.start + clip.duration) + '\nSource ' + tc(clip.sourceIn) + ' → ' + tc(clip.sourceOut)));
+  if (track.locked) panel.append(node('div', 'inspector-note', 'Track is locked. Unlock its header to edit content.'));
+  if (workspace === 'edit' && track.kind === 'video') {
+    heading('Motion · local ' + tc(time)); const transform = evaluateTransform(clip.transform, time);
+    const specs = [['Scale', 'scale', .01, 10, .01], ['Position X', 'x', -10, 10, .01], ['Position Y', 'y', -10, 10, .01], ['Rotation', 'rotation', -36000, 36000, 1], ['Opacity', 'opacity', 0, 1, .01]];
+    for (const [label, property, min, max, step] of specs) {
+      const curve = clip.transform[property], existing = curve.keyframes.find((k) => Math.abs(k.time - q(time)) < 1e-6);
+      const key = button('◆', existing ? 'Remove keyframe at playhead' : 'Add keyframe at playhead', () => command(existing ? 'keyframe_remove' : 'keyframe_set', { clipId: clip.id, property, time: q(time), ...(existing ? {} : { value: transform[property] }) }), 'key-button' + (curve.keyframes.length ? ' keyed' : ''));
+      key.dataset.keyProperty = property;
+      numericControl(panel, label, transform[property], min, max, step, (value) => command(curve.keyframes.length ? 'keyframe_set' : 'clip_set_transform', { clipId: clip.id, ...(curve.keyframes.length ? { property, time: q(time), value } : { [property]: value }) }), key);
+    }
+    const section = heading('Keyframes'); const choice = node('select'); choice.setAttribute('aria-label', 'Keyframe property'); for (const property of ['x', 'y', 'scale', 'rotation', 'opacity']) { const opt = node('option', '', property); opt.value = property; choice.append(opt); }
+    choice.value = renderInspector.keyProperty ?? 'opacity'; section.append(choice);
+    choice.addEventListener('change', () => { renderInspector.keyProperty = choice.value; renderInspector(); });
+    const property = choice.value, curve = clip.transform[property], plot = node('canvas', 'curve'); plot.width = 260; plot.height = 64; plot.dataset.property = property; panel.append(plot); drawCurve(plot, curve, clip.duration, time);
+    const list = node('div', 'key-list'); for (const key of curve.keyframes) {
+      const row = node('div', 'key-row'), value = node('input'), easing = node('select'); value.type = 'number'; value.value = key.value; value.setAttribute('aria-label', 'Keyframe value at ' + key.time);
+      for (const e of EASINGS) { const opt = node('option', '', e); opt.value = e; easing.append(opt); } easing.value = key.easing; easing.setAttribute('aria-label', 'Keyframe easing at ' + key.time);
+      const update = () => command('keyframe_set', { clipId: clip.id, property, time: key.time, value: Number(value.value), easing: easing.value }); value.addEventListener('change', update); easing.addEventListener('change', update);
+      row.append(button(tc(key.time), 'Seek keyframe', () => setHead(clip.start + key.time)), value, easing, button('×', 'Remove keyframe', () => command('keyframe_remove', { clipId: clip.id, property, time: key.time }))); list.append(row);
+    }
+    panel.append(list);
   }
-  const { clip, track } = sel;
-  const asset = assetFor(clip);
-
-  els.inspector.replaceChildren();
-
-  const addReadonly = (label, value) => {
-    const f = document.createElement('div');
-    f.className = 'field';
-    const l = document.createElement('label'); l.textContent = label;
-    const v = document.createElement('div'); v.textContent = value;
-    f.append(l, v);
-    els.inspector.appendChild(f);
-  };
-
-  addReadonly('Track', track.name);
-  addReadonly('Source', asset?.name ?? '(missing)');
-  addReadonly('Position', `${fmt(clip.start)} → ${fmt(clip.start + clip.duration)}`);
-  addReadonly('Source in/out', `${fmt(clip.sourceIn)} → ${fmt(clip.sourceOut)}`);
-
-  const slider = (label, value, min, max, step, onChange) => {
-    const f = document.createElement('div');
-    f.className = 'field';
-    const l = document.createElement('label');
-    l.textContent = label;
-    const val = document.createElement('span');
-    val.className = 'value';
-    val.textContent = value.toFixed(2);
-    l.appendChild(val);
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = String(min); input.max = String(max); input.step = String(step);
-    input.value = String(value);
-    input.setAttribute('aria-label', label);
-    input.addEventListener('input', () => {
-      val.textContent = Number(input.value).toFixed(2);
-      onChange(Number(input.value));
-    });
-    f.append(l, input);
-    els.inspector.appendChild(f);
-  };
-
-  const t = clip.transform;
-  slider('Scale', t.scale.value, 0.1, 3, 0.01, (v) => command('clip_transform', { clipId: clip.id, scale: v }));
-  slider('Position X', t.x.value, -1, 1, 0.01, (v) => command('clip_transform', { clipId: clip.id, x: v }));
-  slider('Position Y', t.y.value, -1, 1, 0.01, (v) => command('clip_transform', { clipId: clip.id, y: v }));
-  slider('Opacity', t.opacity.value, 0, 1, 0.01, (v) => command('clip_transform', { clipId: clip.id, opacity: v }));
-  slider('Rotation', t.rotation.value, -180, 180, 1, (v) => command('clip_transform', { clipId: clip.id, rotation: v }));
-  slider('Volume', clip.volume, 0, 2, 0.01, (v) => command('clip_audio', { clipId: clip.id, volume: v }));
+  if (workspace === 'audio' || track.kind === 'audio') {
+    heading('Gain'); if (track.kind === 'audio') {
+      numericControl(panel, 'Volume', clip.volume, 0, 4, .01, (volume) => command('clip_set_audio', { clipId: clip.id, volume }));
+      const meter = node('div', 'meter'), fill = node('div', 'meter-fill'); fill.id = 'audio-meter-fill'; meter.append(fill); const label = node('div', 'meter-label', 'RMS −∞ dBFS · decoded output'); label.id = 'audio-meter-label'; panel.append(meter, label);
+    } else panel.append(node('div', 'inspector-note', 'Audio is mixed from audio tracks. Place the source on an audio track to hear or edit its gain.'));
+  }
+  heading(workspace === 'color' ? 'Color stack' : 'Effects stack');
+  if (workspace === 'color' && track.kind === 'video') panel.append(button('＋ Color adjustment', 'Add a real RGB color adjustment', () => addSelectedEffect('color_adjust'), 'accent'));
+  const effects = clip.effects.filter((effect) => workspace === 'color' ? ['color_adjust', 'grayscale', 'sepia'].includes(effect.type) : workspace === 'audio' ? effect.type === 'audio_fade' : true);
+  for (const effect of effects) {
+    const descriptor = EFFECT_CATALOG.find((e) => e.type === effect.type), card = node('div', 'effect-card'); card.dataset.effectId = effect.id; card.dataset.effectType = effect.type;
+    const head = node('header'), toggle = node('input'); toggle.type = 'checkbox'; toggle.checked = effect.enabled; toggle.setAttribute('aria-label', 'Enable ' + effect.type); toggle.addEventListener('change', () => command('effect_update', { clipId: clip.id, effectId: effect.id, enabled: toggle.checked }));
+    head.append(toggle, node('span', '', descriptor?.name ?? effect.type), button('×', 'Remove effect', () => command('effect_remove', { clipId: clip.id, effectId: effect.id }))); card.append(head);
+    for (const [name, schema] of Object.entries(descriptor?.params ?? {})) {
+      if (schema.type === 'number') numericControl(card, name, Number(effect.params[name] ?? schema.default), schema.min, schema.max, .01, (value) => command('effect_update', { clipId: clip.id, effectId: effect.id, params: { [name]: value } }));
+      else { const row = node('div', 'control-row'), select = node('select'); for (const value of schema.choices) { const opt = node('option', '', value); opt.value = value; select.append(opt); } select.value = effect.params[name] ?? schema.default; select.setAttribute('aria-label', name); select.addEventListener('change', () => command('effect_update', { clipId: clip.id, effectId: effect.id, params: { [name]: select.value } })); row.append(node('label', '', name), select); card.append(row); }
+    }
+    if (effect.type === 'blur' || effect.type === 'sharpen') card.append(node('div', 'inspector-note', 'Live spatial kernel is an approximation. Export uses FFmpeg.'));
+    if (!descriptor) card.append(node('div', 'inspector-note', 'Unsupported effect. Remove or disable before export.'));
+    panel.append(card);
+  }
+  if (!effects.length) panel.append(node('div', 'inspector-note', 'Choose an effect from the Effects browser.'));
+  if (Object.values(clip.transform).some((p) => p.keyframes.length) || clip.effects.some((e) => e.enabled && e.type.endsWith('_fade'))) panel.append(node('div', 'inspector-note', 'Animated/fading clips: split and head trim cannot rebase curves yet. Moving/slipping/duplicating preserves local animation; unsupported boundary edits return an error.'));
+}
+function drawCurve(plot, curve, length, time) {
+  const c = plot.getContext('2d'), values = [curve.value, ...curve.keyframes.map((k) => k.value)], min = Math.min(...values), max = Math.max(...values), range = max - min || 1;
+  const x = (t) => t / length * 250 + 5, y = (v) => 54 - (v - min) / range * 44;
+  c.strokeStyle = '#353b49'; for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(0, i * 16); c.lineTo(260, i * 16); c.stroke(); }
+  c.strokeStyle = '#b19bec'; c.beginPath(); for (let i = 0; i <= 250; i++) { const v = evaluateAnimatable(curve, i / 250 * length); if (i) c.lineTo(i + 5, y(v)); else c.moveTo(5, y(v)); } c.stroke();
+  c.fillStyle = '#d2bfff'; for (const key of curve.keyframes) { c.beginPath(); c.arc(x(key.time), y(key.value), 3, 0, Math.PI * 2); c.fill(); }
+  c.strokeStyle = '#f0a35e'; c.beginPath(); c.moveTo(x(time), 0); c.lineTo(x(time), 64); c.stroke();
 }
 
-// ---------------------------------------------------------------- commands
-
-async function command(action, payload) {
-  if (!project) return null;
-  try {
-    const res = await fetch(`${BRIDGE}/command`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...payload }),
-    });
-    const body = await res.json();
-    if (!body.ok) throw new Error(body.error?.message ?? 'command failed');
-    return body;
-  } catch (err) {
-    toast(String(err.message ?? err), 'error');
-    return null;
+// Dense timeline: scroll/zoom, clip thumbnails/waveforms, track controls and actual edit gestures.
+function renderTrackHeaders() {
+  $('track-headers').replaceChildren();
+  for (const track of tracks()) {
+    const row = node('div', 'track-header' + (track.id === targetTrackId ? ' selected' : '')); row.dataset.trackId = track.id;
+    const name = button(track.name, 'Target source placement to ' + track.name, () => { targetTrackId = track.id; renderTrackHeaders(); }, 'track-name');
+    const mute = button('M', 'Mute ' + track.name, () => command('track_update', { trackId: track.id, muted: !track.muted }), track.muted ? 'active' : ''); mute.dataset.trackMute = track.id;
+    const lock = button(track.locked ? '◆' : '◇', 'Lock / unlock ' + track.name, () => command('track_update', { trackId: track.id, locked: !track.locked }), track.locked ? 'active' : ''); lock.dataset.trackLock = track.id;
+    row.append(name, mute, lock, node('span', 'track-kind', track.kind.toUpperCase() + (track.locked ? ' · LOCKED' : ''))); $('track-headers').append(row);
   }
+  const tail = node('div'); tail.style.height = '24px'; $('track-headers').append(tail); $('track-headers').scrollTop = $('timeline-scroll').scrollTop;
+  const chosen = targetTrackId ?? $('source-track').value;
+  $('source-track').replaceChildren(...tracks().map((track) => { const opt = node('option', '', track.name + (track.locked ? ' 🔒' : '')); opt.value = track.id; return opt; }));
+  if (project.timeline.tracks.some((t) => t.id === chosen)) $('source-track').value = chosen; targetTrackId = $('source-track').value;
 }
-
-// -------------------------------------------------------------- interaction
-
-canvas.addEventListener('pointerdown', (event) => {
-  if (!project || !canvas._tOf) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-
-  if (y < RULER_H) {
-    playhead = Math.max(0, canvas._tOf(x));
-    updateTransport();
-    syncPreview();
-    renderTimeline();
-    return;
-  }
-
-  // Hit-test clips.
-  const tracks = [...project.timeline.tracks].sort((a, b) => b.order - a.order);
-  const index = Math.floor((y - RULER_H) / TRACK_H);
-  const track = tracks[index];
-  if (!track) return;
-  const t = canvas._tOf(x);
-  const clip = track.clips.find((c) => t >= c.start && t < c.start + c.duration);
-
-  selectedClipId = clip?.id ?? null;
-  if (clip) playhead = t;
-
-  renderTimeline();
-  renderInspector();
-  updateTransport();
-  syncPreview();
-});
-
-function updateTransport() {
-  const duration = timelineDuration();
-  els.scrub.value = String(duration > 0 ? Math.round((playhead / duration) * 1000) : 0);
-  els.timecode.textContent = `${fmt(playhead)} / ${fmt(duration)}`;
-}
-
-els.scrub.addEventListener('input', () => {
-  const duration = timelineDuration();
-  playhead = (Number(els.scrub.value) / 1000) * duration;
-  updateTransport();
-  syncPreview();
-  renderTimeline();
-});
-
-els.play.addEventListener('click', () => {
-  if (!project || timelineDuration() <= 0) return;
-  playing = !playing;
-  els.play.textContent = playing ? '❚❚' : '▶';
-  syncPreview();
-});
-
-els.import.addEventListener('click', async () => {
+function renderTimeline() {
   if (!project) return;
-  try {
-  const paths = await window.palmier.pickMedia();
-  if (!paths?.length) return;
-  for (const p of paths) {
-    // Always route through the bridge so viewer mode edits the agent's timeline.
-    const res = await command('media_import', { path: p });
-    if (res) toast(`Imported ${p.split(/[\\/]/).pop()}`, 'ok');
+  const dpr = devicePixelRatio || 1, ordered = tracks(), width = Math.max($('timeline-scroll').clientWidth, (Math.max(10, duration() + 2)) * pps), height = Math.max(ordered.length * TRACK_H + RULER_H + 24, $('timeline-scroll').clientHeight - 2);
+  canvas.style.width = width + 'px'; canvas.style.height = height + 'px'; canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvas._xOf = (t) => t * pps; canvas._tOf = (x) => x / pps; canvas.dataset.trackHeight = TRACK_H; canvas.dataset.rulerHeight = RULER_H; canvas.dataset.pps = pps;
+  canvas.dataset.waveformPeaks = [...waveforms.values()].reduce((n, peaks) => n + peaks.length, 0);
+  ctx.fillStyle = '#1a1c21'; ctx.fillRect(0, 0, width, height); ctx.fillStyle = '#282b33'; ctx.fillRect(0, 0, width, RULER_H);
+  let step = .1; while (step * pps < 70) step = step < 1 ? step * 2 : step < 2 ? 2 : step < 5 ? 5 : step * 2;
+  ctx.font = '9px ui-monospace,monospace'; ctx.textBaseline = 'middle';
+  for (let t = 0; t * pps <= width; t += step) { const x = t * pps; ctx.strokeStyle = '#2f333d'; ctx.beginPath(); ctx.moveTo(x, RULER_H); ctx.lineTo(x, height); ctx.stroke(); ctx.fillStyle = '#7c859a'; ctx.fillText(tc(t), x + 5, 13); }
+  for (let i = 0; i < ordered.length; i++) {
+    const track = ordered[i], y = RULER_H + i * TRACK_H; ctx.fillStyle = track.kind === 'audio' ? '#1d2525' : '#1e222a'; ctx.fillRect(0, y, width, TRACK_H - 1);
+    for (const clip of track.clips) {
+      const x = clip.start * pps, w = Math.max(2, clip.duration * pps), h = TRACK_H - 10, asset = assetFor(clip), selected = clip.id === selectedClipId;
+      ctx.globalAlpha = track.muted ? .4 : 1; ctx.fillStyle = track.kind === 'video' ? '#3b6ea5' : '#3f7a68'; ctx.fillRect(x + 1, y + 4, w - 2, h);
+      ctx.fillStyle = track.kind === 'video' ? '#446784' : '#456f62'; ctx.fillRect(x + 1, y + 4, w - 2, 16);
+      if (track.kind === 'audio') { if (asset?.hasAudio && !waveforms.has(asset.id)) { waveforms.set(asset.id, []); fetch(BRIDGE + '/waveform', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }) }).then((r) => r.json()).then((result) => { if (result.ok) waveforms.set(asset.id, result.peaks); renderTimeline(); }).catch(() => {}); }
+        const peaks = waveforms.get(asset?.id) ?? []; ctx.strokeStyle = '#99c8b5'; ctx.beginPath();
+        for (let px = x + 3; px < x + w - 3; px += 2) { const source = clip.sourceIn + (px - x) / pps, peak = peaks[Math.min(peaks.length - 1, Math.floor(source / (asset?.duration || 1) * peaks.length))] ?? 0, ph = Math.min(1, peak * clip.volume) * 25; ctx.moveTo(px, y + 38 - ph / 2); ctx.lineTo(px, y + 38 + ph / 2); } ctx.stroke();
+      } else if (thumbs.has(asset?.id)) {
+        const cacheKey = 'image:' + asset.id; if (!thumbs.has(cacheKey)) { const image = new Image(); image.src = thumbs.get(asset.id); image.onload = renderTimeline; thumbs.set(cacheKey, image); }
+        const image = thumbs.get(cacheKey); if (image.complete && image.naturalWidth) { ctx.save(); ctx.beginPath(); ctx.rect(x + 2, y + 21, w - 4, 32); ctx.clip(); ctx.globalAlpha = track.muted ? .3 : .75; for (let px = x + 2; px < x + w; px += 57) ctx.drawImage(image, px, y + 21, 57, 32); ctx.restore(); }
+      }
+      ctx.fillStyle = '#e0e6f0'; ctx.save(); ctx.beginPath(); ctx.rect(x + 4, y + 4, Math.max(0, w - 8), 15); ctx.clip(); ctx.fillText(clip.label ?? asset?.name ?? 'Clip', x + 6, y + 12); ctx.restore();
+      if (clip.effects.some((e) => e.enabled)) { ctx.fillStyle = '#c7b1eb'; ctx.fillText('fx', x + w - 15, y + 13); }
+      if (selected) { ctx.strokeStyle = '#c7bcff'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 4, w - 2, h); ctx.lineWidth = 1; } ctx.globalAlpha = 1;
+    }
   }
-  } catch (err) { toast(`Import failed: ${err.message ?? err}`, 'error'); }
-});
-
-function showExportProgress(fraction) {
-  if (els.exportBtn.disabled) {
-    els.exportBtn.textContent = `Export ${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
-    els.exportBtn.dataset.progress = String(fraction);
-  }
+  ctx.strokeStyle = '#f0a35e'; ctx.beginPath(); ctx.moveTo(playhead * pps + .5, RULER_H); ctx.lineTo(playhead * pps + .5, height); ctx.stroke(); ctx.fillStyle = '#f0a35e'; ctx.beginPath(); ctx.moveTo(playhead * pps - 5, 20); ctx.lineTo(playhead * pps + 5, 20); ctx.lineTo(playhead * pps, 28); ctx.fill();
 }
-window.palmier?.onExportProgress?.((progress) => showExportProgress(progress.fraction));
-
-els.exportBtn.addEventListener('click', async () => {
-  if (!project || els.exportBtn.disabled) return;
-  try {
-  const target = await window.palmier.pickExportPath();
-  if (!target) return;
-  els.exportBtn.disabled = true;
-  showExportProgress(0);
-  toast('Exporting…');
-  const result = await window.palmier.runExport(target);
-  if (result.ok) toast(`Exported ${result.outputPath}`, 'ok');
-  else toast(`Export failed: ${result.error?.message}`, 'error');
-  } catch (err) { toast(`Export failed: ${err.message ?? err}`, 'error'); }
-  finally { els.exportBtn.disabled = false; els.exportBtn.textContent = 'Export'; }
+function snapped(time, ignore) {
+  let result = q(Math.max(0, time)); if (!snap) return result;
+  const targets = [0, playhead, ...project.timeline.tracks.flatMap((track) => track.clips.filter((clip) => clip.id !== ignore).flatMap((clip) => [clip.start, clip.start + clip.duration]))];
+  const near = targets.sort((a, b) => Math.abs(a - result) - Math.abs(b - result))[0]; if (Math.abs(near - result) * pps < 8) result = q(near); return result;
+}
+let gesture = null;
+canvas.addEventListener('pointerdown', (event) => {
+  if (!project) return; sourceFocused = false;
+  const rect = canvas.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top, time = x / pps;
+  if (y < RULER_H) { setHead(time); return; }
+  const track = tracks()[Math.floor((y - RULER_H) / TRACK_H)]; if (!track) return;
+  targetTrackId = track.id; const clip = track.clips.find((c) => time >= c.start && time < c.start + c.duration); select(clip?.id ?? null); renderTrackHeaders();
+  if (!clip) { setHead(time); return; }
+  if (tool === 'razor') { void command('clip_split', { clipId: clip.id, at: q(time) }); return; }
+  setHead(time); canvas.setPointerCapture(event.pointerId);
+  const edge = tool === 'select' && Math.abs(x - clip.start * pps) < 6 ? 'in' : tool === 'select' && Math.abs(x - (clip.start + clip.duration) * pps) < 6 ? 'out' : null;
+  gesture = { pointer: event.pointerId, x, track, clip, edge, tool }; $('tool-status').textContent = edge ? 'Trim ' + edge : tool;
+});
+canvas.addEventListener('pointermove', (event) => { if (gesture) { const delta = (event.clientX - canvas.getBoundingClientRect().left - gesture.x) / pps; $('tool-status').textContent = gesture.tool + ' ' + (delta >= 0 ? '+' : '') + q(delta).toFixed(2) + 's'; } });
+canvas.addEventListener('pointerup', async (event) => {
+  if (!gesture) return; const g = gesture; gesture = null; const rect = canvas.getBoundingClientRect(), x = event.clientX - rect.left, delta = q((x - g.x) / pps); if (Math.abs(delta) < 1 / fps()) { $('tool-status').textContent = tool; return; }
+  if (g.tool === 'slip') await command('clip_slip', { clipId: g.clip.id, delta });
+  else if (g.tool === 'roll') { const right = g.track.clips.find((c) => Math.abs(c.start - (g.clip.start + g.clip.duration)) < 1e-6); if (right) await command('clip_roll', { leftClipId: g.clip.id, rightClipId: right.id, at: snapped(right.start + delta) }); else toast('Roll requires an adjacent clip to the right', 'error'); }
+  else if (g.edge) await command('clip_trim', { clipId: g.clip.id, edge: g.edge, time: snapped((g.edge === 'in' ? g.clip.start : g.clip.start + g.clip.duration) + delta, g.clip.id) });
+  else { const target = tracks()[Math.floor((event.clientY - rect.top - RULER_H) / TRACK_H)]; await command('clip_move', { clipId: g.clip.id, start: snapped(g.clip.start + delta, g.clip.id), trackId: target?.id ?? g.track.id }); }
+  $('tool-status').textContent = tool; renderTimeline();
+});
+canvas.addEventListener('pointercancel', () => { gesture = null; });
+canvas.addEventListener('dragover', (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; });
+canvas.addEventListener('drop', async (event) => {
+  event.preventDefault(); const id = event.dataTransfer.getData('application/x-freemier-asset') || event.dataTransfer.getData('text/plain'); if (!project.media.some((a) => a.id === id)) return;
+  const rect = canvas.getBoundingClientRect(), track = tracks()[Math.floor((event.clientY - rect.top - RULER_H) / TRACK_H)]; if (!track) return;
+  const source = id === sourceAssetId, result = await command('clip_add', { trackId: track.id, assetId: id, start: snapped((event.clientX - rect.left) / pps), sourceIn: source ? sourceIn : 0, duration: source ? sourceOut - sourceIn : undefined, strict: true });
+  if (result) select(result.clip.id);
 });
 
-window.addEventListener('resize', () => { renderTimeline(); syncPreview(); });
-
-// Playback loop: advance the playhead in real time.
+function setTool(next) { tool = next; for (const button of document.querySelectorAll('[data-tool]')) button.classList.toggle('active', button.dataset.tool === next); $('tool-status').textContent = next[0].toUpperCase() + next.slice(1); canvas.style.cursor = next === 'razor' ? 'crosshair' : next === 'slip' || next === 'roll' ? 'ew-resize' : 'default'; }
+function updateTransport() { $('scrub').value = duration() ? String(playhead / duration() * 1000) : '0'; $('timecode').textContent = tc(playhead) + ' / ' + tc(duration()); if (document.activeElement !== $('timecode-input')) $('timecode-input').value = tc(playhead); $('duration-label').textContent = tc(duration()); $('btn-play').textContent = playing ? '❚❚' : '▶'; }
+async function togglePlay() { if (!duration()) return; sourceFocused = false; if (!playing && playhead >= duration()) playhead = 0; playing = !playing; if (playing) await audioContext?.resume(); updateTransport(); syncPreview(); }
+async function saveProject() { const path = await api.pickProjectSavePath(); if (!path) return; if (await command('project_save', { path })) toast('Project saved'); }
+async function openProject() { const path = await api.pickProjectOpenPath(); if (!path) return; playing = sourcePlaying = false; if (await command('project_load', { path })) toast('Project opened'); }
+function duplicateSelected() { if (find()) void command('clip_duplicate', { clipId: selectedClipId, start: Math.max(duration(), find().clip.start + find().clip.duration) }); }
+function deleteSelected() { if (find()) void command('clip_remove', { clipId: selectedClipId, ripple: $('ripple-delete').checked }); }
+function showProgress(value) { if ($('btn-export').disabled) { $('btn-export').textContent = 'Export ' + Math.round(value * 100) + '%'; $('btn-export').dataset.progress = String(value); } }
+$('btn-export').addEventListener('click', async () => {
+  const path = await api.pickExportPath(); if (!path) return; $('btn-export').disabled = true; showProgress(0); toast('Exporting sequence…');
+  try { const result = await api.runExport(path); if (!result.ok) throw new Error(result.error?.message); toast('Exported sequence'); } catch (error) { toast('Export failed: ' + error.message, 'error'); } finally { $('btn-export').disabled = false; $('btn-export').textContent = 'Export ↗'; }
+});
+api?.onExportProgress?.((event) => showProgress(event.fraction));
+$('btn-import').addEventListener('click', async () => { const paths = await api.pickMedia(); for (const path of paths ?? []) { const result = await command('media_import', { path }); if (result) toast('Imported ' + result.asset.name); } });
+$('btn-save').addEventListener('click', saveProject); $('btn-open').addEventListener('click', openProject);
+$('btn-undo').addEventListener('click', () => command('undo')); $('btn-redo').addEventListener('click', () => command('redo'));
+$('btn-play').addEventListener('click', togglePlay); $('btn-start').addEventListener('click', () => setHead(0)); $('btn-end').addEventListener('click', () => setHead(duration())); $('btn-prev').addEventListener('click', () => setHead(playhead - 1 / fps())); $('btn-next').addEventListener('click', () => setHead(playhead + 1 / fps()));
+$('scrub').addEventListener('input', () => { sourceFocused = false; setHead(Number($('scrub').value) / 1000 * duration()); });
+$('timecode-input').addEventListener('change', () => { const values = $('timecode-input').value.split(':').map(Number); if (values.length === 4 && values.every(Number.isFinite)) setHead(values[0] * 3600 + values[1] * 60 + values[2] + values[3] / fps()); else { toast('Use HH:MM:SS:FF', 'error'); updateTransport(); } });
+$('source-monitor').addEventListener('pointerdown', () => sourceFocused = true); $('program-monitor').addEventListener('pointerdown', () => sourceFocused = false);
+$('source-scrub').addEventListener('input', () => { const asset = project?.media.find((a) => a.id === sourceAssetId); if (asset) sourceSeek(Number($('source-scrub').value) / 1000 * asset.duration); });
+$('source-prev').addEventListener('click', () => sourceSeek(sourceHead - 1 / fps())); $('source-next').addEventListener('click', () => sourceSeek(sourceHead + 1 / fps()));
+$('source-play').addEventListener('click', () => { if (sourceEl) { sourcePlaying = !sourcePlaying; updateSource(); } });
+$('source-in').addEventListener('click', () => { if (sourceAssetId && sourceHead < sourceOut) { sourceIn = q(sourceHead); updateSource(); } });
+$('source-out').addEventListener('click', () => { if (sourceAssetId && sourceHead > sourceIn) { sourceOut = q(sourceHead); updateSource(); } });
+$('source-clear').addEventListener('click', () => { const asset = project?.media.find((a) => a.id === sourceAssetId); if (asset) { sourceIn = 0; sourceOut = asset.duration; updateSource(); } });
+$('source-place').addEventListener('click', placeSource); $('source-track').addEventListener('change', () => { targetTrackId = $('source-track').value; renderTrackHeaders(); });
+$('bin-search').addEventListener('input', renderMediaBin); $('bin-view').addEventListener('click', () => { grid = !grid; $('bin-view').textContent = grid ? '▦' : '☷'; renderMediaBin(); });
+for (const button of document.querySelectorAll('[data-browser]')) button.addEventListener('click', () => { browser = button.dataset.browser; $('bin-search').value = ''; document.querySelectorAll('[data-browser]').forEach((b) => b.classList.toggle('active', b === button)); renderMediaBin(); });
+for (const button of document.querySelectorAll('#workspace-tabs [data-workspace]')) button.addEventListener('click', () => { workspace = button.dataset.workspace; document.body.dataset.workspace = workspace; document.querySelectorAll('#workspace-tabs button').forEach((b) => b.classList.toggle('active', b === button)); renderInspector(); });
+for (const button of document.querySelectorAll('[data-tool]')) button.addEventListener('click', () => setTool(button.dataset.tool));
+$('btn-snap').addEventListener('click', () => { snap = !snap; $('btn-snap').classList.toggle('active', snap); }); $('btn-duplicate').addEventListener('click', duplicateSelected); $('btn-delete').addEventListener('click', deleteSelected);
+$('timeline-zoom').addEventListener('input', () => { pps = Number($('timeline-zoom').value); renderTimeline(); }); $('zoom-fit').addEventListener('click', () => { pps = Math.max(20, Math.min(300, $('timeline-scroll').clientWidth / Math.max(duration() + .5, 1))); $('timeline-zoom').value = pps; renderTimeline(); });
+$('timeline-scroll').addEventListener('scroll', () => { $('track-headers').scrollTop = $('timeline-scroll').scrollTop; });
+$('btn-add-video').addEventListener('click', () => command('track_add', { kind: 'video' })); $('btn-add-audio').addEventListener('click', () => command('track_add', { kind: 'audio' }));
+document.addEventListener('keydown', (event) => {
+  if (event.target.closest?.('input,textarea,select,[contenteditable=true]')) return;
+  const key = event.key.toLowerCase(), mod = event.ctrlKey || event.metaKey;
+  if (mod && key === 's') { event.preventDefault(); void saveProject(); }
+  else if (mod && key === 'o') { event.preventDefault(); void openProject(); }
+  else if (mod && key === 'z') { event.preventDefault(); void command(event.shiftKey ? 'redo' : 'undo'); }
+  else if (mod && key === 'd') { event.preventDefault(); duplicateSelected(); }
+  else if (key === ' ') { event.preventDefault(); if (sourceFocused && sourceEl) { sourcePlaying = !sourcePlaying; updateSource(); } else void togglePlay(); }
+  else if (key === 'arrowleft' || key === 'arrowright') { event.preventDefault(); const delta = (key === 'arrowright' ? 1 : -1) / fps(); if (sourceFocused) sourceSeek(sourceHead + delta); else setHead(playhead + delta); }
+  else if (key === 'home') setHead(0); else if (key === 'end') setHead(duration());
+  else if (key === 'delete' || key === 'backspace') { event.preventDefault(); deleteSelected(); }
+  else if (key === 's') $('btn-snap').click();
+  else if (['v', 'c', 'y', 'n'].includes(key)) setTool({ v: 'select', c: 'razor', y: 'slip', n: 'roll' }[key]);
+  else if (sourceFocused && key === 'i') $('source-in').click(); else if (sourceFocused && key === 'o') $('source-out').click();
+});
 let lastTick = performance.now();
 function tick(now) {
-  const dt = (now - lastTick) / 1000;
-  lastTick = now;
-  if (playing) {
-    playhead += dt;
-    const duration = timelineDuration();
-    if (playhead >= duration) { playhead = duration; playing = false; els.play.textContent = '▶'; }
-    updateTransport();
-    syncPreview();
-    renderTimeline();
+  const delta = Math.min(.1, (now - lastTick) / 1000); lastTick = now;
+  if (playing) { playhead = Math.min(duration(), playhead + delta); if (playhead >= duration()) playing = false; updateTransport(); syncPreview(); renderTimeline(); }
+  if (sourcePlaying) { const asset = project?.media.find((a) => a.id === sourceAssetId); sourceHead = Math.min(asset?.duration ?? 0, sourceHead + delta); if (sourceHead >= (asset?.duration ?? 0)) sourcePlaying = false; updateSource(); }
+  const sel = find(), analyser = sel && decoders.get(sel.clip.id)?.analyser;
+  if ($('audio-meter-fill')) { let rms = 0; if (analyser) { const samples = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(samples); rms = Math.sqrt(samples.reduce((sum, x) => sum + x * x, 0) / samples.length); }
+    const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity; $('audio-meter-fill').style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%'; $('audio-meter-label').textContent = 'RMS ' + (Number.isFinite(db) ? db.toFixed(1) : '−∞') + ' dBFS · decoded output';
   }
   requestAnimationFrame(tick);
 }
-requestAnimationFrame(tick);
-
-// ------------------------------------------------------------------- boot
-
-window.palmier?.onCheckState?.(() => reportRenderedState());
-
-async function boot() {
-  // Live sync must survive any single IPC failure — connect() always runs.
-  try {
-    const info = await window.palmier.getInfo();
-    workspaceDir = info?.workspace ?? '';
-    mode = info?.viewerMode ? 'viewer' : 'standalone';
-  } catch { /* defaults keep the editor usable */ }
-  workspaceDir = workspaceDir || '';
-  connect();
-  // Initial paint from /state in case the SSE snapshot raced our subscribe.
-  try {
-    const res = await fetch(`${BRIDGE}/state`);
-    const body = await res.json();
-    applyState(body.project ?? body, body.revision);
-  } catch { /* the stream will deliver it */ }
-}
-
-void boot();
+window.addEventListener('resize', () => { renderTimeline(); drawProgram(); }); api?.onCheckState?.(report);
+async function boot() { try { await api.getInfo(); } catch {} connect(); try { const state = await (await fetch(BRIDGE + '/state')).json(); if (!project) applyState(state.project, state.revision, state); } catch {} }
+requestAnimationFrame(tick); void boot();

@@ -5,6 +5,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./animation": { "types": "./dist/animation.d.ts", "default": "./dist/animation.js" },
+    "./effects": { "types": "./dist/effects.d.ts", "default": "./dist/effects.js" },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

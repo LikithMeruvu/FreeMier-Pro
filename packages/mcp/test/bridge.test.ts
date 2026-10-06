@@ -60,6 +60,11 @@ describe('LiveBridge', () => {
     expect(body.ok).toBe(true);
   });
 
+  it('rejects malformed encoded media identifiers without crashing the bridge', async () => {
+    expect((await fetch(`${base}/media/%E0%A4%A`)).status).toBe(400);
+    expect((await fetch(`${base}/health`)).ok).toBe(true);
+  });
+
   it('returns 404 with the available routes for an unknown path', async () => {
     const res = await fetch(`${base}/nope`);
     expect(res.status).toBe(404);

@@ -1,5 +1,6 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { promises as fs } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import type { EditorStore } from '@freemier/engine';
 import { z } from 'zod';
@@ -70,7 +71,7 @@ export class LiveBridge {
         revision: event.revision,
         kind: event.kind,
         ids: event.ids,
-        state: event.state,
+        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo },
       });
     });
 
@@ -147,7 +148,7 @@ export class LiveBridge {
       const aliases: Record<string, string> = { clip_transform: 'clip_set_transform', clip_audio: 'clip_set_audio' };
       const action = aliases[String(body.action ?? '')] ?? String(body.action ?? '');
       const tool = TOOLS.find((t) => t.name === action);
-      if (!tool || ['project_load', 'project_create', 'export_video'].includes(action)) throw new EditorError('INVALID_ARGUMENT', 'Unknown bridge command', { action });
+      if (!tool || ['project_create', 'export_video'].includes(action)) throw new EditorError('INVALID_ARGUMENT', 'Unknown bridge command', { action });
       const parsed = z.object(tool.inputSchema).safeParse(body);
       if (!parsed.success) throw new EditorError('INVALID_ARGUMENT', 'Invalid command arguments', { issues: parsed.error.issues });
       const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, notify: () => {} });
@@ -207,6 +208,31 @@ export class LiveBridge {
     }
   }
 
+  /** Imported assets only; supports decoder byte ranges and CORS-safe canvas pixels. */
+  async #serveMedia(req: IncomingMessage, res: ServerResponse, assetId: string): Promise<void> {
+    const asset = this.#store.project.media.find((m) => m.id === assetId);
+    if (!asset) { this.#json(res, 404, { error: 'asset not found' }); return; }
+    const file = asset.copied && !path.isAbsolute(asset.path) ? path.resolve(this.#workspace, 'media', asset.path) : asset.path;
+    try {
+      const stat = await fs.stat(file), size = stat.size;
+      const mime: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+      res.setHeader('Content-Type', mime[path.extname(file).toLowerCase()] ?? 'application/octet-stream');
+      res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Cache-Control', 'private, no-store');
+      let start = 0, end = size - 1;
+      if (req.headers.range) {
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+        if (!range || (!range[1] && !range[2])) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+        if (!range[1]) start = Math.max(0, size - Number(range[2]));
+        else { start = Number(range[1]); if (range[2]) end = Math.min(size - 1, Number(range[2])); }
+        if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+        res.statusCode = 206; res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+      }
+      res.setHeader('Content-Length', end - start + 1);
+      if (req.method === 'HEAD') { res.end(); return; }
+      const stream = createReadStream(file, { start, end }); stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
+    } catch { this.#json(res, 404, { error: 'media file unavailable' }); }
+  }
+
   #handle(req: IncomingMessage, res: ServerResponse): void {
     // Loopback only — defence in depth in case the bind address is changed.
     const remote = req.socket.remoteAddress ?? '';
@@ -232,6 +258,11 @@ export class LiveBridge {
 
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = url.pathname;
+    if (route.startsWith('/media/') && (req.method === 'GET' || req.method === 'HEAD')) {
+      try { void this.#serveMedia(req, res, decodeURIComponent(route.slice('/media/'.length))); }
+      catch { this.#json(res, 400, { error: 'invalid media identifier' }); }
+      return;
+    }
 
     if (route === '/state') {
       this.#json(res, 200, {
@@ -259,7 +290,7 @@ export class LiveBridge {
       res.write(`data: ${JSON.stringify({
         type: 'snapshot',
         revision: this.#store.revision,
-        state: { project: this.#store.project, revision: this.#store.revision },
+        state: { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo },
       })}\n\n`);
 
       // Keepalive so proxies and the browser do not drop an idle stream.

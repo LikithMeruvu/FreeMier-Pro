@@ -32,7 +32,7 @@ let mcpStdioAttached = false;
 let owningWorkspace = WORKSPACE;
 // Native dialog selection is the only test substitution. Editing/rendering/export stay real.
 const testDialogs = process.env.FREEMIER_TEST_MODE === '1'
-  ? JSON.parse(process.env.FREEMIER_TEST_DIALOGS ?? '{}') as { media?: string[]; output?: string }
+  ? JSON.parse(process.env.FREEMIER_TEST_DIALOGS ?? '{}') as { media?: string[]; output?: string; project?: string }
   : null;
 
 /** Probe whether a bridge is already listening on the preferred port. */
@@ -116,6 +116,15 @@ let lastRendererState: Record<string, unknown> | null = null;
 ipcMain.on('renderer:state', (_e, snapshot) => { lastRendererState = snapshot as Record<string, unknown>; });
 
 ipcMain.handle('renderer:get-state', () => lastRendererState);
+
+// CDP screenshot capture can stall for hidden Windows windows. Capture the
+// same production webContents without exposing filesystem access to the page.
+if (testDialogs) ipcMain.handle('test:capture-page', async () => {
+  if (!mainWindow) throw new Error('No editor window');
+  const image = await mainWindow.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
+  if (image.isEmpty()) throw new Error('Editor capture is empty');
+  return image.toPNG().toString('base64');
+});
 
 /** Ask the renderer to report its state right now, and wait for the reply. */
 ipcMain.handle('renderer:request-state', async () => {
@@ -208,6 +217,17 @@ ipcMain.handle('dialog:pickMedia', async () => {
     filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'webm', 'avi', 'mp3', 'wav', 'm4a', 'ogg', 'png', 'jpg', 'jpeg', 'webp'] }, { name: 'All files', extensions: ['*'] }],
   });
   return result.canceled ? [] : result.filePaths;
+});
+
+ipcMain.handle('dialog:saveProject', async () => {
+  if (testDialogs) return testDialogs.project ?? null;
+  const result = await dialog.showSaveDialog({ title: 'Save FreeMier project', defaultPath: path.join(owningWorkspace, 'Edit.freemier'), filters: [{ name: 'FreeMier project directory', extensions: ['freemier'] }] });
+  return result.canceled ? null : result.filePath;
+});
+ipcMain.handle('dialog:openProject', async () => {
+  if (testDialogs) return testDialogs.project ?? null;
+  const result = await dialog.showOpenDialog({ title: 'Open .freemier or legacy .palmier project', properties: ['openDirectory'] });
+  return result.canceled ? null : result.filePaths[0];
 });
 
 app.whenReady().then(boot).catch((err) => {

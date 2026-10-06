@@ -2,60 +2,64 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; media-src 'self' file: data: blob: http://127.0.0.1:*; img-src 'self' file: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; media-src 'self' data: blob: http://127.0.0.1:*; img-src 'self' data: blob: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'" />
 <title>FreeMier Pro</title>
 <link rel="stylesheet" href="./app.css" />
 </head>
-<body>
+<body data-workspace="edit">
   <header id="topbar">
-    <div class="brand">FreeMier<span class="dot">●</span></div>
-    <div id="project-name" class="project-name">Untitled Project</div>
-    <div class="spacer"></div>
-    <div id="live-status" class="live-status" title="Live sync from agent edits">
-      <span class="pulse"></span><span id="live-text">connecting…</span>
-    </div>
-    <button id="btn-import" class="btn">Import media</button>
-    <button id="btn-export" class="btn primary">Export</button>
+    <div class="brand"><span class="brand-mark">FM</span><span>FreeMier <b>Pro</b></span></div>
+    <span class="divider"></span><div id="project-name">Untitled Project</div>
+    <nav id="workspace-tabs" aria-label="Workspace">
+      <button data-workspace="edit" class="active">Edit</button><button data-workspace="color">Color</button><button data-workspace="audio">Audio</button>
+    </nav>
+    <div id="live-status" class="live-status"><span class="pulse"></span><span id="live-text">Connecting</span></div>
+    <button id="btn-export" class="primary">Export ↗</button>
   </header>
-
+  <div id="menubar">
+    <button id="btn-open" title="Open a FreeMier project">Open</button><button id="btn-save" title="Save project (Ctrl+S)">Save</button><span class="divider"></span>
+    <button id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button><button id="btn-redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
+    <span class="spacer"></span><span id="project-format">1920 × 1080 · 30 fps</span><span class="divider"></span><span id="revision">rev 0</span>
+  </div>
   <main id="layout">
     <aside id="left" class="panel">
-      <div class="panel-head">Media</div>
-      <div id="media-bin" class="media-bin">
-        <div class="empty">No media yet — import a file or let the agent add one.</div>
-      </div>
+      <div class="panel-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><span class="spacer"></span><button id="btn-import" title="Import media">＋</button></div>
+      <div class="search-row"><input id="bin-search" type="search" placeholder="Search media" aria-label="Search media" /><button id="bin-view" title="Toggle list/grid view">▦</button></div>
+      <div id="media-bin" class="media-bin grid"></div><div id="effects-browser" class="effects-browser" hidden></div>
+      <div class="panel-foot"><span id="bin-count">0 items</span><span class="spacer"></span><span>Drag to timeline</span></div>
     </aside>
-
-    <section id="center">
-      <div id="preview-wrap">
-        <div id="preview-stage">
-          <div id="preview-empty" class="preview-empty">Preview</div>
-        </div>
-        <div id="transport">
-          <button id="btn-play" class="btn icon">▶</button>
-          <input id="scrub" type="range" min="0" max="1000" value="0" />
-          <div id="timecode" class="timecode">00:00.00 / 00:00.00</div>
-        </div>
-      </div>
-
-      <div id="timeline-wrap">
-        <div id="timeline-head">
-          <span class="panel-title">Timeline</span>
-          <span id="revision" class="revision">rev 0</span>
-        </div>
-        <canvas id="timeline"></canvas>
-      </div>
+    <section id="monitors">
+      <section class="monitor panel" id="source-monitor">
+        <div class="panel-head"><span>Source <span id="source-name" class="subtle">No selection</span></span><span class="badge">ORIGINAL</span></div>
+        <div id="source-stage" class="monitor-stage"><div id="source-empty" class="monitor-empty"><span>◇</span>Double-click media to open source</div></div>
+        <div class="monitor-readout"><span id="source-timecode">00:00:00:00</span><span id="source-range" class="subtle">No in / out</span></div>
+        <input id="source-scrub" class="monitor-scrub" type="range" min="0" max="1000" value="0" aria-label="Source playhead" />
+        <div class="transport"><button id="source-prev" title="Previous source frame">|◀</button><button id="source-play" title="Play source">▶</button><button id="source-next" title="Next source frame">▶|</button><span class="divider"></span><button id="source-in" title="Mark source in (I)">I</button><button id="source-out" title="Mark source out (O)">O</button><button id="source-clear" title="Clear source range">↺</button></div>
+        <div class="source-placement"><select id="source-track" aria-label="Source target track"></select><select id="source-placement" aria-label="Source placement"><option value="strict">At playhead</option><option value="ripple">Ripple insert</option><option value="append">Append</option></select><button id="source-place" class="accent" title="Place marked source range on the selected track">Place ↘</button></div>
+      </section>
+      <section class="monitor panel" id="program-monitor">
+        <div class="panel-head"><span>Program <span class="subtle">Sequence</span></span><span class="badge" id="preview-quality">CPU preview</span></div>
+        <div id="preview-stage" class="monitor-stage"><canvas id="program-canvas"></canvas><div id="preview-empty" class="monitor-empty"><span>▱</span>Your sequence appears here</div></div>
+        <div class="monitor-readout"><input id="timecode-input" aria-label="Program timecode" value="00:00:00:00" /><span id="timecode" class="subtle">00:00:00:00 / 00:00:00:00</span></div>
+        <input id="scrub" class="monitor-scrub" type="range" min="0" max="1000" value="0" aria-label="Program playhead" />
+        <div class="transport"><button id="btn-start" title="Sequence start (Home)">|◀◀</button><button id="btn-prev" title="Previous frame (Left)">|◀</button><button id="btn-play" title="Play / pause (Space)">▶</button><button id="btn-next" title="Next frame (Right)">▶|</button><button id="btn-end" title="Sequence end (End)">▶▶|</button></div>
+        <div id="preview-note" class="preview-note">Program follows the owning project store</div>
+      </section>
     </section>
-
-    <aside id="right" class="panel">
-      <div class="panel-head">Inspector</div>
-      <div id="inspector" class="inspector">
-        <div class="empty">Select a clip to edit it.</div>
-      </div>
-    </aside>
+    <aside id="right" class="panel"><div class="panel-head"><span id="inspector-title">Effect controls</span><span class="badge" id="selection-kind">SEQUENCE</span></div><div id="inspector" class="inspector"></div></aside>
   </main>
-
-  <div id="toast" class="toast"></div>
+  <section id="timeline-wrap" class="panel">
+    <div id="timeline-head"><span class="sequence-tab">▱ <b id="sequence-name">Sequence</b></span><span class="spacer"></span><span id="duration-label" class="subtle"></span><button id="btn-add-video" title="Add video track">＋ V</button><button id="btn-add-audio" title="Add audio track">＋ A</button></div>
+    <div class="timeline-toolbar">
+      <div id="edit-tools"><button data-tool="select" class="active" title="Selection and edge trim (V)">↖ <kbd>V</kbd></button><button data-tool="razor" title="Razor (C). Split animated/fading clips is currently unsupported.">╱ <kbd>C</kbd></button><button data-tool="slip" title="Slip source window (Y)">↔ <kbd>Y</kbd></button><button data-tool="roll" title="Roll adjacent cut (N). Animated/fading right clips cannot be rebased yet.">][ <kbd>N</kbd></button></div>
+      <span class="divider"></span><button id="btn-snap" class="active" title="Snap to clip boundaries/playhead (S)">⊓ Snap</button><button id="btn-duplicate" title="Duplicate selected clip (Ctrl+D)">Duplicate</button><button id="btn-delete" title="Delete selected clip (Delete)">Delete</button><label class="toggle"><input id="ripple-delete" type="checkbox" /> Ripple</label>
+      <span class="spacer"></span><span id="tool-status" class="subtle">Selection</span><span class="divider"></span><button id="zoom-fit" title="Fit sequence">Fit</button><span class="subtle">−</span><input id="timeline-zoom" type="range" min="20" max="300" value="90" aria-label="Timeline zoom" /><span class="subtle">＋</span>
+    </div>
+    <div id="timeline-body"><div id="track-headers"></div><div id="timeline-scroll"><canvas id="timeline"></canvas></div></div>
+    <div class="timeline-foot"><span class="live-dot"></span><span>Single project · live MCP</span><span class="spacer"></span><span id="selection-info">No clip selected</span><span class="divider"></span><span>CPU fallback</span></div>
+  </section>
+  <div id="toast" class="toast" role="status"></div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
