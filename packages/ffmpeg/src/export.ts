@@ -1,9 +1,12 @@
 import type { Project, Timeline, Clip, MediaAsset, Track } from '@freemier/shared';
-import { EditorError, evaluateTransform, validateTransformValue, effectDescriptor } from '@freemier/shared';
+import { EditorError, evaluateTransform, validateTransformValue, effectDescriptor, formatSrt } from '@freemier/shared';
 import { animatedTransformFilter, effectFilters } from './effects.js';
 import { runFfmpeg } from './run.js';
 import { clipEnd, timelineDuration } from '@freemier/engine';
 import path from 'node:path';
+import os from 'node:os';
+import { promises as fs } from 'node:fs';
+import { prepareCaptionLayers, prepareTitleLayers, type TextLayer } from './text.js';
 
 /**
  * Timeline -> FFmpeg export.
@@ -32,6 +35,12 @@ export interface ExportOptions {
   height?: number;
   /** Called with 0..1 progress when FFmpeg reports it. */
   onProgress?: (fraction: number) => void;
+  /** Optional persistent cache; default temporary text artifacts are cleaned after export. */
+  textCacheDirectory?: string;
+  /** Internal prepared glyph layers. Pure argument builder requires these for text. */
+  preparedTextLayers?: readonly TextLayer[];
+  /** Caption rendering/export policy. Default burn-in. */
+  captionPolicy?: 'burn-in' | 'none' | 'sidecar';
 }
 
 export interface ExportResult {
@@ -39,6 +48,7 @@ export interface ExportResult {
   durationSeconds: number;
   clipCount: number;
   args: string[];
+  sidecarPath?: string;
 }
 
 interface ClipRef {
@@ -61,6 +71,8 @@ export function buildExportArgs(
   opts: ExportOptions,
 ): { args: string[]; duration: number; clipCount: number } {
   const timeline = project.timeline;
+  const captionPolicy = opts.captionPolicy ?? 'burn-in';
+  if (!['burn-in', 'none', 'sidecar'].includes(captionPolicy)) throw new EditorError('INVALID_ARGUMENT', 'Unknown caption export policy');
   const duration = timelineDuration(timeline);
   if (duration <= 0) {
     throw new EditorError('INVALID_ARGUMENT', 'Cannot export an empty timeline', {
@@ -117,7 +129,10 @@ export function buildExportArgs(
     }
   }
 
-  if (clipRefs.length === 0) {
+  const hasCaptionOutput = (opts.captionPolicy ?? 'burn-in') === 'burn-in' && !!timeline.captions?.enabled && timeline.captions.cues.length > 0;
+  const textCount = (timeline.titles?.length ?? 0) + (hasCaptionOutput ? timeline.captions!.cues.length : 0);
+  if ((opts.preparedTextLayers?.length ?? 0) !== textCount) throw new EditorError('INVALID_ARGUMENT', 'Every visible text item must be rasterized before argument construction; use exportProject');
+  if (clipRefs.length === 0 && !(timeline.titles?.length) && !(timeline.captions?.cues.length)) {
     throw new EditorError('INVALID_ARGUMENT', 'Cannot export a timeline with no clips', {
       projectId: project.id,
     });
@@ -213,6 +228,12 @@ export function buildExportArgs(
     aLabel++;
   }
 
+  for (const layer of opts.preparedTextLayers ?? []) {
+    inputs.push('-loop', '1', '-framerate', f(fps), '-t', f(duration), '-i', layer.file);
+    const nextCanvas = `text${inputIndex}`;
+    filters.push(`[${canvas}][${inputIndex}:v]overlay=x=0:y=0:format=auto:eof_action=pass:enable='gte(t,${f(layer.start)})*lt(t,${f(layer.end)})'[${nextCanvas}]`);
+    canvas = nextCanvas; inputIndex++;
+  }
   const args: string[] = ['-y', '-hide_banner', '-nostdin', ...inputs];
 
   const outputArgs: string[] = [];
@@ -256,52 +277,75 @@ export function buildExportArgs(
  * Streams FFmpeg's progress output so callers can drive a progress bar.
  */
 export async function exportProject(project: Project, opts: ExportOptions): Promise<ExportResult> {
-  const { args, duration, clipCount } = buildExportArgs(project, opts);
+  const titles = project.timeline.titles ?? [];
+  const policy = opts.captionPolicy ?? 'burn-in';
+  const captionTrack = project.timeline.captions;
+  let temporary: string | undefined;
+  try {
+    const shouldRenderText = titles.length > 0 || (policy === 'burn-in' && captionTrack?.enabled && captionTrack.cues.length > 0);
+    const cache = opts.textCacheDirectory ?? (shouldRenderText ? temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'freemier-text-export-')) : '');
+    const width = opts.width ?? project.timeline.width, height = opts.height ?? project.timeline.height;
+    const layers = await prepareTitleLayers(titles, width, height, cache);
+    if (policy === 'burn-in' && captionTrack?.enabled) layers.push(...await prepareCaptionLayers(captionTrack.cues, captionTrack.style, width, height, cache));
+    const { args, duration, clipCount } = buildExportArgs(project, { ...opts, preparedTextLayers: layers });
 
-  if (opts.onProgress) {
-    // Re-run with progress parsing: execute, then map out_time_ms to a fraction.
-    const { spawn } = await import('node:child_process');
-    const { getFfmpegConfig } = await import('./run.js');
-    const cfg = getFfmpegConfig();
+    if (opts.onProgress) {
+      // Re-run with progress parsing: execute, then map out_time_ms to a fraction.
+      const { spawn } = await import('node:child_process');
+      const { getFfmpegConfig } = await import('./run.js');
+      const cfg = getFfmpegConfig();
 
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(cfg.ffmpegPath, args, { windowsHide: true });
-      let stderr = '';
-      let stdout = '';
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(cfg.ffmpegPath, args, { windowsHide: true });
+        let stderr = '';
+        let stdout = '';
 
-      child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8');
-        let idx: number;
-        while ((idx = stdout.indexOf('\n')) >= 0) {
-          const line = stdout.slice(0, idx).trim();
-          stdout = stdout.slice(idx + 1);
-          const m = /^out_time_ms=(\d+)$/.exec(line);
-          if (m) {
-            const seconds = Number(m[1]) / 1_000_000;
-            opts.onProgress?.(Math.min(1, Math.max(0, seconds / duration)));
+        child.stdout.on('data', (chunk: Buffer) => {
+          stdout += chunk.toString('utf8');
+          let idx: number;
+          while ((idx = stdout.indexOf('\n')) >= 0) {
+            const line = stdout.slice(0, idx).trim();
+            stdout = stdout.slice(idx + 1);
+            const m = /^out_time_ms=(\d+)$/.exec(line);
+            if (m) {
+              const seconds = Number(m[1]) / 1_000_000;
+              opts.onProgress?.(Math.min(1, Math.max(0, seconds / duration)));
+            }
           }
-        }
+        });
+        child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+        child.on('error', (err) => {
+          reject(new EditorError('IO_ERROR', 'Failed to launch FFmpeg', { cause: err.message }));
+        });
+        child.on('close', (code) => {
+          if (code === 0) {
+            opts.onProgress?.(1);
+            resolve();
+          } else {
+            reject(new EditorError('EXPORT_ERROR', `FFmpeg exited with code ${code}`, {
+              stderrTail: stderr.trim().split(/\r?\n/).slice(-15).join('\n'),
+            }));
+          }
+        });
       });
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-      child.on('error', (err) => {
-        reject(new EditorError('IO_ERROR', 'Failed to launch FFmpeg', { cause: err.message }));
-      });
-      child.on('close', (code) => {
-        if (code === 0) {
-          opts.onProgress?.(1);
-          resolve();
-        } else {
-          reject(new EditorError('EXPORT_ERROR', `FFmpeg exited with code ${code}`, {
-            stderrTail: stderr.trim().split(/\r?\n/).slice(-15).join('\n'),
-          }));
-        }
-      });
-    });
-  } else {
-    await runFfmpeg(args, 'ffmpeg export');
-  }
+    } else {
+      await runFfmpeg(args, 'ffmpeg export');
+    }
 
-  return { outputPath: opts.outputPath, durationSeconds: duration, clipCount, args };
+    let sidecarPath: string | undefined;
+    if (policy === 'sidecar' && captionTrack?.enabled && captionTrack.cues.length) {
+      sidecarPath = `${opts.outputPath}.srt`;
+      const tempSidecar = `${sidecarPath}.tmp-${process.pid}`;
+      try { await fs.writeFile(tempSidecar, formatSrt(captionTrack.cues), 'utf8'); await fs.rename(tempSidecar, sidecarPath); }
+      catch (error) { await fs.rm(tempSidecar, { force: true }).catch(() => {}); throw new EditorError('IO_ERROR', 'Video exported but caption sidecar could not be written', { outputPath: opts.outputPath, sidecarPath, cause: error instanceof Error ? error.message : String(error) }); }
+    }
+    return { outputPath: opts.outputPath, durationSeconds: duration, clipCount, args, ...(sidecarPath ? { sidecarPath } : {}) };
+  } finally {
+    if (temporary) {
+      if (!path.resolve(temporary).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new EditorError('INTERNAL', 'Unsafe export cleanup');
+      await fs.rm(temporary, { recursive: true, force: true });
+    }
+  }
 }
 
 /** Human-readable graph, for debugging export problems. */

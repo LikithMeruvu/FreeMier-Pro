@@ -13,6 +13,8 @@ import { newMediaId, defaultTransform, EditorError } from '@freemier/shared';
 import type { Clip } from '@freemier/shared';
 import { PROFESSIONAL_TOOLS } from './professional-tools.js';
 import { MARKER_TOOLS } from './marker-tools.js';
+import { TITLE_TOOLS } from './title-tools.js';
+import { CAPTION_TOOLS } from './caption-tools.js';
 
 /**
  * The MCP tool surface.
@@ -46,13 +48,15 @@ const ok = (data: Record<string, unknown>) => ({ ok: true, ...data });
 /** Require that a project has at least one clip before exporting. */
 function assertExportable(store: EditorStore): void {
   if (timelineDuration(store.project.timeline) <= 0) {
-    throw new EditorError('INVALID_ARGUMENT', 'Timeline is empty — add at least one clip before exporting.');
+    throw new EditorError('INVALID_ARGUMENT', 'Timeline is empty — add media or visible text before exporting.');
   }
 }
 
 export const TOOLS: ToolDef[] = [
   ...PROFESSIONAL_TOOLS,
   ...MARKER_TOOLS,
+  ...TITLE_TOOLS,
+  ...CAPTION_TOOLS,
   {
     name: 'media_probe', title: 'Probe media',
     description: 'Inspect a media file with ffprobe without importing it or changing the project.',
@@ -495,6 +499,7 @@ export const TOOLS: ToolDef[] = [
       codec: z.enum(['h264', 'h265', 'prores']).optional().describe('Video codec, default h264'),
       crf: z.number().min(0).max(51).optional().describe('Quality: lower is better. Default 20'),
       preset: z.string().optional().describe('Encoder preset, e.g. ultrafast/fast/medium/slow'),
+      captionPolicy: z.enum(['burn-in', 'none', 'sidecar']).optional().describe('Subtitle output: burn-in (default), none, or create a neighboring .srt file'),
     },
     handler: async (a, ctx) => {
       assertExportable(ctx.store);
@@ -502,14 +507,17 @@ export const TOOLS: ToolDef[] = [
       const result = await exportProject(ctx.store.project, {
         outputPath: out,
         mediaDirectory: `${ctx.workspace}/media`,
+        textCacheDirectory: `${ctx.workspace}/cache/text`,
         codec: a.codec as 'h264' | 'h265' | 'prores' | undefined,
         crf: a.crf as number | undefined,
         preset: a.preset as string | undefined,
+        captionPolicy: a.captionPolicy as 'burn-in' | 'none' | 'sidecar' | undefined,
       });
       return ok({
         outputPath: result.outputPath,
         durationSeconds: result.durationSeconds,
         clipCount: result.clipCount,
+        ...(result.sidecarPath ? { sidecarPath: result.sidecarPath } : {}),
       });
     },
   },
@@ -517,22 +525,30 @@ export const TOOLS: ToolDef[] = [
     name: 'export_preview',
     title: 'Preview export plan',
     description:
-      'Describe what export_video would produce — duration, clip count, and the FFmpeg argument list — without rendering. Use this to sanity-check before a long export.',
+      'Describe export duration, clip count and actual FFmpeg arguments without rendering video. Text glyph assets may be prepared in the cache. Use this before a long export.',
     inputSchema: {
       outputPath: z.string().optional(),
       codec: z.enum(['h264', 'h265', 'prores']).optional(),
       crf: z.number().min(0).max(51).optional(),
+      captionPolicy: z.enum(['burn-in', 'none', 'sidecar']).optional(),
     },
     handler: async (a, ctx) => {
       assertExportable(ctx.store);
-      const { describeExport } = await import('@freemier/ffmpeg');
-      const summary = describeExport(ctx.store.project, {
+      const { buildExportArgs, describeExport, prepareCaptionLayers, prepareTitleLayers } = await import('@freemier/ffmpeg');
+      const timeline = ctx.store.project.timeline, width = timeline.width, height = timeline.height;
+      const captionPolicy = a.captionPolicy as 'burn-in' | 'none' | 'sidecar' | undefined ?? 'burn-in';
+      const preparedTextLayers = await prepareTitleLayers(timeline.titles ?? [], width, height, `${ctx.workspace}/cache/text`);
+      if (captionPolicy === 'burn-in' && timeline.captions?.enabled) preparedTextLayers.push(...await prepareCaptionLayers(timeline.captions.cues, timeline.captions.style, width, height, `${ctx.workspace}/cache/text`));
+      const options = {
+        preparedTextLayers,
         outputPath: (a.outputPath as string | undefined) ?? `${ctx.workspace}/preview.mp4`,
         mediaDirectory: `${ctx.workspace}/media`,
         codec: a.codec as 'h264' | 'h265' | 'prores' | undefined,
         crf: a.crf as number | undefined,
-      });
-      return ok({ summary, duration: timelineDuration(ctx.store.project.timeline) });
+        captionPolicy,
+      };
+      const summary = describeExport(ctx.store.project, options), plan = buildExportArgs(ctx.store.project, options);
+      return ok({ summary, duration: plan.duration, captionPolicy });
     },
   },
 ];

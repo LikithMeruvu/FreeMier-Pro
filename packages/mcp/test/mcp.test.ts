@@ -125,9 +125,9 @@ afterAll(async () => {
 });
 
 describe('MCP protocol', () => {
-  it('initializes and lists all 46 tools with schemas', async () => {
+  it('initializes and lists all 58 tools with schemas', async () => {
     const tools = await client.listTools();
-    expect(tools.length).toBe(46);
+    expect(tools.length).toBe(58);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z_]+$/);
       expect(t.description.length).toBeGreaterThan(10);
@@ -145,6 +145,8 @@ describe('MCP protocol', () => {
       'clip_slip', 'clip_roll', 'clip_duplicate', 'keyframe_set', 'keyframe_remove', 'keyframe_list',
       'effect_add', 'effect_update', 'effect_remove', 'effect_list', 'effect_catalog', 'editor_capabilities',
       'marker_add', 'marker_update', 'marker_remove', 'marker_list',
+      'font_list', 'title_add', 'title_update', 'title_remove', 'title_list',
+      'caption_add', 'caption_update', 'caption_remove', 'captions_list', 'captions_import', 'captions_export', 'caption_track_update',
     ]) {
       expect(names, `missing tool: ${required}`).toContain(required);
     }
@@ -171,6 +173,31 @@ describe('MCP protocol', () => {
 });
 
 describe('agent edit workflow', () => {
+  it('edits and exports a real title-only composition through standard stdio', async () => {
+    await client.call('project_create', { name: 'Titles', width: 320, height: 180, fps: 10 });
+    const fonts = await client.call('font_list'); expect((fonts.fonts as Array<{ bundled: boolean }>)[0]!.bundled).toBe(true);
+    const title = (await client.call('title_add', { text: '100% Δ · Ж', start: 0, end: 1, style: { fontSize: 24 } })).title as { id: string };
+    await client.call('title_update', { titleId: title.id, style: { color: '#00ff00' } });
+    expect(((await client.call('title_list')).titles as Array<{ style: { color: string } }>)[0]!.style.color).toBe('#00ff00');
+    const summary = await client.call('export_preview'); expect(summary.duration).toBe(1);
+    const result = await client.call('export_video', { outputPath: path.join(workspace, 'stdio-title.mp4'), preset: 'ultrafast' }); expect(result.clipCount).toBe(0); expect(result.durationSeconds).toBe(1); expect((await fs.stat(result.outputPath as string)).size).toBeGreaterThan(1000);
+    const saved = path.join(workspace, 'Title project'); await client.call('project_save', { path: saved }); await client.call('title_remove', { titleId: title.id }); expect((await client.call('title_list')).titles).toEqual([]);
+    await client.call('undo'); expect((await client.call('title_list')).titles).toHaveLength(1); await client.call('project_load', { path: saved }); expect((await client.call('title_list')).titles).toHaveLength(1);
+  }, 30000);
+  it('imports millisecond SRT over MCP and exports caption burn-in with exact sequence duration', async () => {
+    await client.call('project_create', { name: 'Captions', width: 320, height: 180, fps: 10 });
+    const imported = await client.call('captions_import', { content: '9\n00:00:00,503 --> 00:00:01,101\nHello from MCP' });
+    expect(imported.warnings).toEqual([]);
+    const list = await client.call('captions_list'); expect(list.timeDomain).toBe('integer milliseconds');
+    expect((list.cues as Array<{ startMs: number; endMs: number; hasFrame: boolean }>)[0]).toMatchObject({ startMs: 503, endMs: 1101, hasFrame: true });
+    expect((await client.call('captions_export')).content).toContain('00:00:00,503 --> 00:00:01,101\nHello from MCP');
+    const result = await client.call('export_video', { outputPath: path.join(workspace, 'stdio-captions.mp4'), preset: 'ultrafast' });
+    expect(result.durationSeconds).toBe(1.2); expect((await fs.stat(result.outputPath as string)).size).toBeGreaterThan(1000);
+    await client.call('caption_track_update', { locked: true });
+    const before = (await client.call('project_info')).revision;
+    const refused = await client.request('tools/call', { name: 'caption_add', arguments: { text: 'No', startMs: 1200, endMs: 1500 } });
+    expect((refused.result as { isError: boolean }).isError).toBe(true); expect((await client.call('project_info')).revision).toBe(before);
+  }, 30000);
   it('edits, queries, saves and undoes fixed markers through actual stdio', async () => {
     await client.call('project_create', { name: 'Markers', fps: 30 });
     const result = await client.call('marker_add', { time: 1.019, label: 'नमस्ते', notes: 'Line 1\nLine 2', color: '#ff0080' });

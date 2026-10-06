@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { EditorStore } from '@freemier/engine';
 import { z } from 'zod';
 import { TOOLS } from './tools.js';
-import { extractThumbnail, extractWaveform, exportProject, importMedia } from '@freemier/ffmpeg';
+import { extractThumbnail, extractWaveform, exportProject, importMedia, rasterText, textRasterKey } from '@freemier/ffmpeg';
 import { EditorError } from '@freemier/shared';
 
 /**
@@ -204,8 +204,10 @@ export class LiveBridge {
       const result = await exportProject(this.#store.project, {
         outputPath: out,
         mediaDirectory: path.join(this.#workspace, 'media'),
+        textCacheDirectory: path.join(this.#workspace, 'cache', 'text'),
         codec: body.codec as 'h264' | 'h265' | 'prores' | undefined,
         crf: typeof body.crf === 'number' ? body.crf : undefined,
+        captionPolicy: body.captionPolicy as 'burn-in' | 'none' | 'sidecar' | undefined,
         onProgress: (fraction) => this.#broadcast({ type: 'export-progress', outputPath: out, fraction }),
       });
       this.#json(res, 200, { ok: true, ...result });
@@ -268,6 +270,32 @@ export class LiveBridge {
 
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = url.pathname;
+    if (route.startsWith('/text/') && req.method === 'GET') {
+      void (async () => {
+        try {
+          const title = this.#store.project.timeline.titles?.find((t) => t.id === decodeURIComponent(route.slice(6)));
+          if (!title) { this.#json(res, 404, { error: 'title not found' }); return; }
+          const { width, height } = this.#store.project.timeline;
+          if (url.searchParams.get('key') !== textRasterKey(title.text, title.style, width, height)) { this.#json(res, 409, { error: 'title changed; request its current raster' }); return; }
+          const file = await rasterText(title.text, title.style, width, height, path.join(this.#workspace, 'cache', 'text'));
+          const bytes = await fs.readFile(file); res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': bytes.length, 'Cache-Control': 'no-store' }); res.end(bytes);
+        } catch (err) { const e = err as EditorError; this.#json(res, 400, { error: { code: e.code ?? 'INTERNAL', message: e.message } }); }
+      })();
+      return;
+    }
+    if (route.startsWith('/caption-text/') && req.method === 'GET') {
+      void (async () => {
+        try {
+          const captions = this.#store.project.timeline.captions, cue = captions?.cues.find((item) => item.id === decodeURIComponent(route.slice('/caption-text/'.length)));
+          if (!captions || !cue) { this.#json(res, 404, { error: 'caption cue not found' }); return; }
+          const { width, height } = this.#store.project.timeline;
+          if (url.searchParams.get('key') !== textRasterKey(cue.text, captions.style, width, height)) { this.#json(res, 409, { error: 'caption changed; request its current raster' }); return; }
+          const file = await rasterText(cue.text, captions.style, width, height, path.join(this.#workspace, 'cache', 'text'));
+          const bytes = await fs.readFile(file); res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': bytes.length, 'Cache-Control': 'no-store' }); res.end(bytes);
+        } catch (err) { const e = err as EditorError; this.#json(res, 400, { error: { code: e.code ?? 'INTERNAL', message: e.message } }); }
+      })();
+      return;
+    }
     if (route.startsWith('/media/') && (req.method === 'GET' || req.method === 'HEAD')) {
       try { void this.#serveMedia(req, res, decodeURIComponent(route.slice('/media/'.length))); }
       catch { this.#json(res, 400, { error: 'invalid media identifier' }); }

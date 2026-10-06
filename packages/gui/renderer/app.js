@@ -1,6 +1,8 @@
 import { evaluateTransform, evaluateAnimatable, EASINGS } from '@freemier/shared/animation';
 import { EFFECT_CATALOG, createColorProcessor, fadeEnvelope } from '@freemier/shared/effects';
 import { frameTimecode, parseFrameTimecode } from '@freemier/shared/timecode';
+import { textRasterPayload } from '@freemier/shared/text';
+import { captionDuration, captionFrames } from '@freemier/shared/captions';
 
 const BRIDGE = 'http://127.0.0.1:' + (new URLSearchParams(location.search).get('bridge') ?? '4317');
 const api = window.freemier ?? window.palmier;
@@ -18,11 +20,12 @@ const TRACK_H = 62, RULER_H = 28;
 const fps = () => project?.timeline.fps ?? 30;
 const q = (t) => Math.round(t * fps()) / fps();
 const tracks = () => [...(project?.timeline.tracks ?? [])].sort((a, b) => b.order - a.order);
-const duration = () => Math.max(0, ...(project?.timeline.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)) ?? []));
+const duration = () => Math.max(0, ...(project?.timeline.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)) ?? []), ...(project?.timeline.titles ?? []).map((t) => t.end), captionDuration(project?.timeline.captions?.cues ?? [], fps()));
 const viewEnd = () => Math.max(duration(), ...(project?.timeline.markers ?? []).map((m) => m.time));
 const find = (id = selectedClipId) => { for (const track of project?.timeline.tracks ?? []) { const clip = track.clips.find((c) => c.id === id); if (clip) return { track, clip }; } return null; };
 const assetFor = (clip) => project?.media.find((m) => m.id === clip.assetId);
 const mediaUrl = (asset) => BRIDGE + '/media/' + encodeURIComponent(asset.id);
+const titleRasters = new Map();
 const local = (clip) => Math.max(0, Math.min(clip.duration, playhead - clip.start));
 function tc(seconds, rate = fps()) {
   return frameTimecode(seconds, rate);
@@ -51,7 +54,10 @@ function applyState(next, nextRevision, history = {}) {
     eventEpoch = history.eventEpoch; eventSequence = history.eventSequence;
   }
   const replace = project?.id !== next.id;
+  if (replace) titleRasters.clear();
   project = next; revision = nextRevision ?? revision;
+  const rasterPayloads = new Set([...(next.timeline.titles ?? []).map((t) => textRasterPayload(t.text, t.style, next.timeline.width, next.timeline.height)), ...(next.timeline.captions?.cues ?? []).map((c) => textRasterPayload(c.text, next.timeline.captions.style, next.timeline.width, next.timeline.height))]);
+  for (const key of titleRasters.keys()) if (!rasterPayloads.has(key)) titleRasters.delete(key);
   if (replace) { selectedClipId = null; playhead = 0; playing = false; sourcePlaying = false; sourceAssetId = null; sourceEl?.pause?.(); $('source-stage').querySelectorAll('video,audio,img').forEach((el) => el.remove()); sourceEl = null; thumbs.clear(); pendingThumbs.clear(); waveforms.clear(); }
   playhead = Math.min(playhead, viewEnd());
   if (!find()) selectedClipId = null;
@@ -88,6 +94,10 @@ function renderMediaBin() {
   const assets = project.media.filter((a) => a.name.toLowerCase().includes(query));
   $('bin-count').textContent = (browser === 'project' ? assets.length : browser === 'effects' ? EFFECT_CATALOG.filter((e) => e.name.toLowerCase().includes(query)).length : (project.timeline.markers ?? []).filter((m) => (m.label + ' ' + m.notes).toLowerCase().includes(query)).length) + ' items';
   renderMarkers(query);
+  $('titles-panel').hidden = browser !== 'titles'; renderTitles(query);
+  $('captions-panel').hidden = browser !== 'captions'; renderCaptions(query);
+  if (browser === 'titles') { $('bin-search').placeholder = 'Search titles'; $('bin-count').textContent = (project.timeline.titles ?? []).filter((t) => t.text.toLowerCase().includes(query)).length + ' items'; }
+  if (browser === 'captions') { $('bin-search').placeholder = 'Search captions'; $('bin-count').textContent = (project.timeline.captions?.cues ?? []).filter((c) => c.text.toLowerCase().includes(query)).length + ' cues'; }
   $('media-bin').replaceChildren(...assets.map((asset) => {
     const item = node('div', 'media-item' + (asset.id === sourceAssetId ? ' selected' : '')); item.dataset.assetId = asset.id; item.draggable = true; item.tabIndex = 0;
     const img = node('img', 'media-thumb'); img.alt = asset.name; if (thumbs.has(asset.id)) img.src = thumbs.get(asset.id); else void thumbnail(asset, img);
@@ -108,6 +118,57 @@ function renderMediaBin() {
     }
   }
 }
+function renderTitles(query = '') {
+  const list = $('title-list'); list.replaceChildren();
+  for (const title of (project?.timeline.titles ?? []).filter((t) => t.text.toLowerCase().includes(query))) {
+    const card = node('div', 'text-card'); card.dataset.titleId = title.id;
+    const top = node('div', 'marker-card-head'); top.append(button(tc(title.start), 'Seek title', () => setHead(title.start)), button('×', 'Delete title', () => command('title_remove', { titleId: title.id }))); card.append(top);
+    const text = node('textarea'); text.rows = 2; text.maxLength = 4096; text.value = title.text; text.setAttribute('aria-label', 'Title text'); text.addEventListener('change', () => command('title_update', { titleId: title.id, text: text.value })); card.append(text);
+    for (const field of ['start', 'end']) numericControl(card, 'Title ' + field, title[field], 0, 86400, 1 / fps(), (value) => command('title_update', { titleId: title.id, [field]: value }));
+    textStyleControls(card, title.style, (style) => command('title_update', { titleId: title.id, style })); list.append(card);
+  }
+}
+function renderCaptions(query = '') {
+  const track = project?.timeline.captions, list = $('caption-list'); list.replaceChildren();
+  $('caption-track-state').textContent = track ? `${track.name} · ${track.enabled ? 'enabled' : 'disabled'} · ${track.locked ? 'locked' : 'unlocked'}` : 'No track';
+  $('caption-lock').textContent = track?.locked ? 'Unlock' : 'Lock';
+  $('caption-name').value = track?.name ?? 'Captions'; $('caption-enabled').checked = track?.enabled ?? true;
+  for (const id of ['caption-name', 'caption-enabled', 'caption-create', 'caption-import']) $(id).disabled = track?.locked ?? false;
+  if (!track) { list.append(node('div', 'empty', 'Add a cue or import SRT to create a subtitle track.')); return; }
+  for (const cue of track.cues.filter((item) => item.text.toLowerCase().includes(query))) {
+    const card = node('div', 'text-card caption-card'); card.dataset.cueId = cue.id;
+    const coverage = captionFrames(cue, fps());
+    const top = node('div', 'marker-card-head'); top.append(button(tc(coverage.startFrame / fps()), 'Seek caption', () => coverage.hasFrame ? setHead(coverage.startFrame / fps()) : toast('No sequence frame lies inside this cue', 'error')), button('×', 'Delete caption', () => command('caption_remove', { cueId: cue.id }))); card.append(top);
+    const input = node('textarea'); input.rows = 2; input.value = cue.text; input.maxLength = 4096; input.setAttribute('aria-label', 'Caption text'); input.addEventListener('change', () => command('caption_update', { cueId: cue.id, text: input.value })); card.append(input);
+    for (const field of ['startMs', 'endMs']) numericControl(card, field === 'startMs' ? 'Start ms' : 'End ms', cue[field], 0, 86_400_000, 1, (value) => command('caption_update', { cueId: cue.id, [field]: Math.round(value) }));
+    list.append(card);
+  }
+  textStyleControls(list, track.style, (style) => command('caption_track_update', { style }));
+  if (track.locked) list.querySelectorAll('button,textarea,input,select').forEach((el) => { el.disabled = true; });
+}
+function textStyleControls(parent, style, commit) {
+  for (const [field, label, min, max, step] of [['fontSize', 'Font size', 8, 512, 1], ['x', 'Anchor X', 0, 1, .01], ['y', 'Anchor Y', 0, 1, .01], ['opacity', 'Text opacity', 0, 1, .01], ['outlineWidth', 'Outline width', 0, 20, 1], ['backgroundOpacity', 'Box opacity', 0, 1, .01], ['padding', 'Box padding', 0, 32, 1], ['lineSpacing', 'Line spacing', 0, 64, 1]]) numericControl(parent, label, style[field], min, max, step, (value) => commit({ [field]: value }));
+  for (const [field, label] of [['color', 'Text color'], ['outlineColor', 'Outline color'], ['backgroundColor', 'Box color']]) { const row = node('label', 'control-row', label), input = node('input'); input.type = 'color'; input.value = style[field]; input.setAttribute('aria-label', label); input.addEventListener('change', () => commit({ [field]: input.value })); row.append(input); parent.append(row); }
+  for (const [field, options] of [['align', ['left', 'center', 'right']], ['verticalAlign', ['top', 'middle', 'bottom']]]) { const row = node('label', 'control-row', field === 'align' ? 'Horizontal' : 'Vertical'), input = node('select'); input.setAttribute('aria-label', field); for (const value of options) { const option = node('option', '', value); option.value = value; input.append(option); } input.value = style[field]; input.addEventListener('change', () => commit({ [field]: input.value })); row.append(input); parent.append(row); }
+}
+function overlayRaster(id, text, style, route = 'text') {
+  const { width, height } = project.timeline, payload = textRasterPayload(text, style, width, height);
+  if (titleRasters.get(payload)?.error && Date.now() - titleRasters.get(payload).failed > 1000) titleRasters.delete(payload);
+  if (!titleRasters.has(payload)) {
+    const entry = { image: null, error: null }; titleRasters.set(payload, entry);
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload)).then(async (bytes) => {
+      const key = [...new Uint8Array(bytes)].map((n) => n.toString(16).padStart(2, '0')).join('');
+      const response = await fetch(BRIDGE + '/' + route + '/' + encodeURIComponent(id) + '?key=' + key);
+      if (!response.ok) { const body = await response.json(); throw new Error(body.error?.message ?? body.error ?? 'Text renderer unavailable'); }
+      const url = URL.createObjectURL(await response.blob()), image = new Image();
+      image.onload = () => { URL.revokeObjectURL(url); entry.image = image; drawProgram(); };
+      image.onerror = () => { URL.revokeObjectURL(url); entry.error = 'Text PNG decode failed'; entry.failed = Date.now(); drawProgram(); }; image.src = url;
+    }).catch((error) => { entry.error = error.message; entry.failed = Date.now(); drawProgram(); });
+  }
+  return titleRasters.get(payload);
+}
+function titleRaster(title) { return overlayRaster(title.id, title.text, title.style); }
+function captionRaster(cue, style) { return overlayRaster(cue.id, cue.text, style, 'caption-text'); }
 function renderMarkers(query = '') {
   const list = $('marker-list'); list.replaceChildren();
   for (const marker of (project?.timeline.markers ?? []).filter((m) => (m.label + ' ' + m.notes).toLowerCase().includes(query))) {
@@ -244,7 +305,16 @@ function drawProgram() {
       programCtx.translate(width / 2 + t.x * width, height / 2 + t.y * height); programCtx.rotate(t.rotation * Math.PI / 180); programCtx.scale(t.scale, t.scale);
       programCtx.drawImage(scratch, -width / 2, -height / 2); programCtx.restore();
     }
-    $('preview-quality').textContent = approximation ? 'Spatial approximation' : 'Shared CPU preview';
+    let textPending = false, textError = null;
+    for (const title of project.timeline.titles ?? []) if (playhead >= title.start - 1e-6 && playhead < title.end - 1e-6) {
+      const raster = titleRaster(title); if (raster.image) programCtx.drawImage(raster.image, 0, 0, width, height); else { textPending = true; textError = raster.error; }
+    }
+    const captions = project.timeline.captions;
+    if (captions?.enabled) for (const cue of captions.cues) if (playhead * 1000 >= cue.startMs && playhead * 1000 < cue.endMs) {
+      const raster = captionRaster(cue, captions.style); if (raster.image) programCtx.drawImage(raster.image, 0, 0, width, height); else { textPending = true; textError = raster.error; }
+    }
+    $('preview-empty').hidden ||= (project.timeline.titles ?? []).some((t) => playhead >= t.start && playhead < t.end) || !!(captions?.enabled && captions.cues.some((cue) => playhead * 1000 >= cue.startMs && playhead * 1000 < cue.endMs));
+    $('preview-quality').textContent = textError ?? (textPending ? 'Rendering text…' : approximation ? 'Spatial approximation' : 'Shared CPU preview');
     $('preview-note').textContent = unknown ? 'Unsupported enabled effect: export will refuse this stack.' : approximation ? 'Blur uses browser Gaussian; sharpen uses RGB spatial processing. Export uses FFmpeg kernels.' : 'Shared RGB, clip-local keyframes & fade envelopes · AV tracks are separate';
   } catch (error) { $('preview-note').textContent = 'Preview error: ' + error.message; }
   finally { applying = false; }
@@ -355,6 +425,8 @@ function renderTimeline() {
   ctx.font = '9px ui-monospace,monospace'; ctx.textBaseline = 'middle';
   for (let t = Math.floor(offsetX / pps / step) * step; t * pps <= offsetX + visibleWidth; t += step) { const x = t * pps; ctx.strokeStyle = '#2f333d'; ctx.beginPath(); ctx.moveTo(x, RULER_H); ctx.lineTo(x, height); ctx.stroke(); ctx.fillStyle = '#7c859a'; ctx.fillText(tc(t), x + 5, 13); }
   for (const marker of project.timeline.markers ?? []) { const x = marker.time * pps; if (x < offsetX - 8 || x > offsetX + visibleWidth + 8) continue; ctx.fillStyle = marker.color; ctx.beginPath(); ctx.moveTo(x - 5, 0); ctx.lineTo(x + 5, 0); ctx.lineTo(x + 5, 13); ctx.lineTo(x, 18); ctx.lineTo(x - 5, 13); ctx.closePath(); ctx.fill(); }
+  for (const title of project.timeline.titles ?? []) { ctx.fillStyle = '#b991eb'; ctx.fillRect(title.start * pps, 19, Math.max(1, (title.end - title.start) * pps), 3); }
+  for (const cue of project.timeline.captions?.cues ?? []) { ctx.fillStyle = '#58c6bf'; ctx.fillRect(cue.startMs / 1000 * pps, 23, Math.max(1, (cue.endMs - cue.startMs) / 1000 * pps), 3); }
   for (let i = 0; i < ordered.length; i++) {
     const track = ordered[i], y = RULER_H + i * TRACK_H; if (y + TRACK_H < offsetY || y > offsetY + visibleHeight) continue; ctx.fillStyle = track.kind === 'audio' ? '#1d2525' : '#1e222a'; ctx.fillRect(0, y, width, TRACK_H - 1);
     for (const clip of track.clips) {
@@ -422,7 +494,7 @@ function deleteSelected() { if (find()) void command('clip_remove', { clipId: se
 function showProgress(value) { if ($('btn-export').disabled) { $('btn-export').textContent = 'Export ' + Math.round(value * 100) + '%'; $('btn-export').dataset.progress = String(value); } }
 $('btn-export').addEventListener('click', async () => {
   const path = await api.pickExportPath(); if (!path) return; $('btn-export').disabled = true; showProgress(0); toast('Exporting sequence…');
-  try { const result = await api.runExport(path); if (!result.ok) throw new Error(result.error?.message); toast('Exported sequence'); } catch (error) { toast('Export failed: ' + error.message, 'error'); } finally { $('btn-export').disabled = false; $('btn-export').textContent = 'Export ↗'; }
+  try { const result = await api.runExport(path, $('caption-policy').value); if (!result.ok) throw new Error(result.error?.message); toast(result.sidecarPath ? 'Exported video and captions: ' + result.sidecarPath : 'Exported sequence'); } catch (error) { toast('Export failed: ' + error.message, 'error'); } finally { $('btn-export').disabled = false; $('btn-export').textContent = 'Export ↗'; }
 });
 api?.onExportProgress?.((event) => showProgress(event.fraction));
 $('btn-import').addEventListener('click', async () => { const paths = await api.pickMedia(); for (const path of paths ?? []) { const result = await command('media_import', { path }); if (result) toast('Imported ' + result.asset.name); } });
@@ -449,6 +521,13 @@ $('timeline-scroll').addEventListener('scroll', () => { $('track-headers').scrol
 new ResizeObserver(renderTimeline).observe($('timeline-scroll'));
 $('btn-add-video').addEventListener('click', () => command('track_add', { kind: 'video' })); $('btn-add-audio').addEventListener('click', () => command('track_add', { kind: 'audio' }));
 $('btn-marker').addEventListener('click', addAtHead); $('marker-create').addEventListener('click', addAtHead);
+$('title-create').addEventListener('click', () => command('title_add', { text: $('title-text').value || 'New title', start: playhead, end: q(playhead + 3), style: { fontSize: Math.max(8, Math.round(project.timeline.height / 12)) } }));
+$('caption-create').addEventListener('click', () => { const startMs = Math.round(playhead * 1000); return command('caption_add', { text: $('caption-text').value || 'New caption', startMs, endMs: startMs + 2000 }); });
+$('caption-lock').addEventListener('click', () => command('caption_track_update', { locked: !project.timeline.captions?.locked }));
+$('caption-name').addEventListener('change', () => command('caption_track_update', { name: $('caption-name').value }));
+$('caption-enabled').addEventListener('change', () => command('caption_track_update', { enabled: $('caption-enabled').checked }));
+$('caption-import').addEventListener('click', () => command('captions_import', { content: $('caption-srt').value, mode: 'replace' }));
+$('caption-export').addEventListener('click', async () => { const result = await command('captions_export'); if (result) $('caption-srt').value = result.content; });
 $('marker-prev').addEventListener('click', () => navigateMarker(-1)); $('marker-next').addEventListener('click', () => navigateMarker(1));
 document.addEventListener('keydown', (event) => {
   if (event.target.closest?.('input,textarea,select,[contenteditable=true]')) return;

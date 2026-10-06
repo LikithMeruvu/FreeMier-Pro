@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { EditorStore, addClip, addMediaAsset } from '@freemier/engine';
+import { EditorStore, addClip, addMediaAsset, addTitle } from '@freemier/engine';
+import { textRasterKey } from '@freemier/ffmpeg';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { LiveBridge } from '../src/bridge.js';
 import { newMediaId } from '@freemier/shared';
 
@@ -33,19 +37,35 @@ function fakeAsset() {
 let bridge: LiveBridge;
 let store: EditorStore;
 let base: string;
+let workspace: string;
 
 beforeAll(async () => {
   store = EditorStore.create({ fps: 30, width: 640, height: 360 });
-  bridge = new LiveBridge({ store, port: 0, workspace: '/tmp/palmier-bridge-test' });
+  workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'freemier-bridge-'));
+  bridge = new LiveBridge({ store, port: 0, workspace });
   const port = await bridge.start();
   base = `http://127.0.0.1:${port}`;
 });
 
 afterAll(async () => {
   await bridge.stop();
+  expect(path.resolve(workspace).startsWith(path.resolve(os.tmpdir()) + path.sep)).toBe(true);
+  await fs.rm(workspace, { recursive: true, force: true });
 });
 
 describe('LiveBridge', () => {
+  it('serves canonical title PNGs and refuses stale/invalid requests without crashing', async () => {
+    const textStore = EditorStore.create({ width: 640, height: 360 }), textBridge = new LiveBridge({ store: textStore, workspace: path.join(workspace, 'text'), port: 0 });
+    const base = `http://127.0.0.1:${await textBridge.start()}`;
+    try {
+    const title = addTitle(textStore, { text: 'Shared Δ Ж', start: 0, end: 1, style: { fontSize: 24 } });
+    const key = textRasterKey(title.text, title.style, 640, 360);
+    expect((await fetch(`${base}/text/${title.id}?key=old`)).status).toBe(409);
+    const response = await fetch(`${base}/text/${title.id}?key=${key}`, { headers: { Origin: 'null' } }); expect(response.status).toBe(200); expect(response.headers.get('Access-Control-Allow-Origin')).toBe('null');
+    const bytes = Buffer.from(await response.arrayBuffer()); expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]); expect(bytes.length).toBeGreaterThan(1000);
+    expect((await fetch(`${base}/text/%zz`)).status).toBe(400); expect((await fetch(`${base}/text/missing`)).status).toBe(404); expect((await fetch(`${base}/health`)).status).toBe(200);
+    } finally { await textBridge.stop(); }
+  }, 30000);
   it('serves the current project state', async () => {
     const res = await fetch(`${base}/state`);
     expect(res.status).toBe(200);

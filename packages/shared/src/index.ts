@@ -5,3 +5,6 @@ export * from './animation.js';
 export * from './effects.js';
 export * from './markers.js';
 export * from './timecode.js';
+export * from './text.js';
+export * from './captions.js';
+export * from './srt.js';

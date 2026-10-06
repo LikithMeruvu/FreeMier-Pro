@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { EditorError } from '@freemier/shared';
+import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
 
@@ -47,12 +48,14 @@ export interface RunResult {
 }
 
 /** Run ffmpeg with an argument array. Throws a structured EditorError on failure. */
-export async function runFfmpeg(args: string[], label = 'ffmpeg'): Promise<RunResult> {
+export async function runFfmpeg(args: string[], label = 'ffmpeg', options: { cwd?: string } = {}): Promise<RunResult> {
   try {
-    const { stdout, stderr } = await execFileAsync(config.ffmpegPath, args, {
+    const binary = options.cwd && !path.isAbsolute(config.ffmpegPath) && /[\\/]/.test(config.ffmpegPath) ? path.resolve(config.ffmpegPath) : config.ffmpegPath;
+    const { stdout, stderr } = await execFileAsync(binary, args, {
       maxBuffer: 256 * 1024 * 1024,
       windowsHide: true,
       encoding: 'utf8',
+      cwd: options.cwd,
     });
     return { stdout, stderr };
   } catch (err) {

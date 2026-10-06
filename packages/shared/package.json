@@ -8,6 +8,9 @@
     "./animation": { "types": "./dist/animation.d.ts", "default": "./dist/animation.js" },
     "./effects": { "types": "./dist/effects.d.ts", "default": "./dist/effects.js" },
     "./timecode": { "types": "./dist/timecode.d.ts", "default": "./dist/timecode.js" },
+    "./text": { "types": "./dist/text.d.ts", "default": "./dist/text.js" },
+    "./srt": { "types": "./dist/srt.d.ts", "default": "./dist/srt.js" },
+    "./captions": { "types": "./dist/captions.d.ts", "default": "./dist/captions.js" },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

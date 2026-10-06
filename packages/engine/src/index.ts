@@ -4,3 +4,5 @@ export * from './operations.js';
 export * from './project.js';
 export * from './professional.js';
 export * from './markers.js';
+export * from './titles.js';
+export * from './captions.js';

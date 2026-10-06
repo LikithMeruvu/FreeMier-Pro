@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/main.cjs",
   "scripts": {
-    "build:main": "esbuild src/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main.cjs && node -e \"require('fs').copyFileSync('src/preload.cjs','dist/preload.cjs')\"",
+    "build:main": "esbuild src/main.ts --bundle --platform=node --format=cjs --define:import.meta.dirname=__dirname --external:electron --outfile=dist/main.cjs && node -e \"require('fs').copyFileSync('src/preload.cjs','dist/preload.cjs')\" && node ../../scripts/copy-gui-fonts.mjs",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "start": "npm run build && electron ."

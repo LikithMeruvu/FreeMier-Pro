@@ -1,5 +1,5 @@
 import type { Timeline, Track, Clip } from '@freemier/shared';
-import { EditorError, overlap } from '@freemier/shared';
+import { captionDuration, EditorError, overlap } from '@freemier/shared';
 
 /**
  * Pure timeline math. No I/O, no mutation — every function returns new values.
@@ -31,7 +31,8 @@ export function trackDuration(track: Track): number {
 
 /** Total duration of the timeline (longest track). */
 export function timelineDuration(timeline: Timeline): number {
-  return timeline.tracks.reduce((max, t) => Math.max(max, trackDuration(t)), 0);
+  const captionEnd = captionDuration(timeline.captions?.cues ?? [], timeline.fps);
+  return Math.max(timeline.tracks.reduce((max, t) => Math.max(max, trackDuration(t)), 0), ...(timeline.titles ?? []).map((t) => t.end), captionEnd);
 }
 
 /**

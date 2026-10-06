@@ -119,6 +119,53 @@ export interface Timeline {
   readonly tracks: readonly Track[];
   /** Optional in legacy schema-1 projects. Markers never extend render duration. */
   readonly markers?: readonly TimelineMarker[];
+  /** Independent topmost overlays, ordered by creation. Optional in schema 1. */
+  readonly titles?: readonly TitleOverlay[];
+  /** Optional independent subtitle track. Cue times retain SRT millisecond precision. */
+  readonly captions?: CaptionTrack;
+}
+
+export interface TextStyle {
+  readonly fontId: 'noto-sans';
+  /** Output pixels at sequence resolution. */
+  readonly fontSize: number;
+  readonly color: string;
+  readonly outlineColor: string;
+  readonly outlineWidth: number;
+  readonly backgroundColor: string;
+  readonly backgroundOpacity: number;
+  readonly padding: number;
+  readonly opacity: number;
+  /** Normalized frame anchor, with explicit text-block alignment. */
+  readonly x: number;
+  readonly y: number;
+  readonly align: 'left' | 'center' | 'right';
+  readonly verticalAlign: 'top' | 'middle' | 'bottom';
+  readonly lineSpacing: number;
+}
+export interface TitleOverlay {
+  readonly id: Id;
+  readonly text: string;
+  /** Frame-quantized sequence seconds, [start,end). */
+  readonly start: number;
+  readonly end: number;
+  readonly style: TextStyle;
+}
+
+export interface CaptionCue {
+  readonly id: Id;
+  readonly text: string;
+  /** Milliseconds in sequence time, half-open [startMs, endMs). */
+  readonly startMs: number;
+  readonly endMs: number;
+}
+export interface CaptionTrack {
+  readonly id: Id;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly locked: boolean;
+  readonly style: TextStyle;
+  readonly cues: readonly CaptionCue[];
 }
 
 /** A project: a timeline plus its media library. */

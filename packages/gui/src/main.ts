@@ -173,7 +173,7 @@ ipcMain.handle('media:import', async (_e, paths: string[]) => {
   return { ok: true, imported };
 });
 
-ipcMain.handle('export:run', async (_e, outputPath?: string) => {
+ipcMain.handle('export:run', async (_e, outputPath?: string, captionPolicy?: 'burn-in' | 'none' | 'sidecar') => {
   const out = outputPath ?? path.join(owningWorkspace, `export-${Date.now()}.mp4`);
   try {
     if (viewerMode) {
@@ -181,7 +181,7 @@ ipcMain.handle('export:run', async (_e, outputPath?: string) => {
       const res = await fetch(`http://127.0.0.1:${bridgePort}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outputPath: out }),
+        body: JSON.stringify({ outputPath: out, captionPolicy }),
       });
       const body = await res.json() as { ok?: boolean; error?: { message?: string } };
       return body;
@@ -191,6 +191,7 @@ ipcMain.handle('export:run', async (_e, outputPath?: string) => {
     const result = await exportProject(ownStore.project, {
       outputPath: out,
       mediaDirectory: path.join(owningWorkspace, 'media'),
+      captionPolicy,
       onProgress: (fraction) => mainWindow?.webContents.send('export:progress', { fraction, outputPath: out }),
     });
     return { ok: true, ...result };

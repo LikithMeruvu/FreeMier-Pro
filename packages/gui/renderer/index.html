@@ -15,7 +15,7 @@
       <button data-workspace="edit" class="active">Edit</button><button data-workspace="color">Color</button><button data-workspace="audio">Audio</button>
     </nav>
     <div id="live-status" class="live-status"><span class="pulse"></span><span id="live-text">Connecting</span></div>
-    <button id="btn-export" class="primary">Export ↗</button>
+    <label class="export-policy">Captions <select id="caption-policy" aria-label="Caption export policy"><option value="burn-in">Burn in</option><option value="sidecar">SRT sidecar</option><option value="none">None</option></select></label><button id="btn-export" class="primary">Export ↗</button>
   </header>
   <div id="menubar">
     <button id="btn-open" title="Open a FreeMier project">Open</button><button id="btn-save" title="Save project (Ctrl+S)">Save</button><span class="divider"></span>
@@ -24,10 +24,12 @@
   </div>
   <main id="layout">
     <aside id="left" class="panel">
-      <div class="panel-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><button data-browser="markers">Markers</button><span class="spacer"></span><button id="btn-import" title="Import media">＋</button></div>
+      <div class="panel-tabs"><div class="library-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><button data-browser="markers">Markers</button><button data-browser="titles">Titles</button><button data-browser="captions">Captions</button></div><button id="btn-import" title="Import media">＋</button></div>
       <div class="search-row"><input id="bin-search" type="search" placeholder="Search media" aria-label="Search media" /><button id="bin-view" title="Toggle list/grid view">▦</button></div>
       <div id="media-bin" class="media-bin grid"></div><div id="effects-browser" class="effects-browser" hidden></div>
       <div id="markers-panel" class="markers-panel" hidden><div class="marker-create"><input id="marker-label" aria-label="New marker label" placeholder="Marker label" maxlength="120" /><button id="marker-create" class="accent" title="Add marker at the sequence playhead">＋ At playhead</button></div><div class="marker-policy">Fixed sequence markers · do not extend export</div><div id="marker-list"></div></div>
+      <div id="titles-panel" class="markers-panel" hidden><div class="marker-create"><textarea id="title-text" aria-label="New title text" placeholder="Title text" maxlength="4096" rows="2"></textarea><button id="title-create" class="accent">＋ Three seconds at playhead</button></div><div class="marker-policy">Noto Sans · Latin/Greek/Cyrillic · shared rendered glyphs</div><div id="title-list"></div></div>
+      <div id="captions-panel" class="markers-panel" hidden><div class="marker-create"><textarea id="caption-text" aria-label="New caption text" placeholder="Subtitle text" maxlength="4096" rows="2"></textarea><button id="caption-create" class="accent">＋ Two seconds at playhead</button></div><label class="control-row">Track <span id="caption-track-state"></span><button id="caption-lock" type="button">Lock</button></label><label class="control-row">Name <input id="caption-name" aria-label="Caption track name" maxlength="120"></label><label class="control-row">Show captions <input id="caption-enabled" aria-label="Show captions" type="checkbox"></label><div class="marker-policy">Integer millisecond cues · SRT · hiding captions preserves sequence duration</div><textarea id="caption-srt" aria-label="SRT import or export" placeholder="Paste SRT to import; export fills this field" rows="5"></textarea><div class="button-row"><button id="caption-import">Import SRT</button><button id="caption-export">Export SRT</button></div><div id="caption-list"></div></div>
       <div class="panel-foot"><span id="bin-count">0 items</span><span class="spacer"></span><span>Drag to timeline</span></div>
     </aside>
     <section id="monitors">
