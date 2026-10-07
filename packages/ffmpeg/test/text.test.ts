@@ -10,6 +10,10 @@ import { rasterText, fontList, FONT_HASH } from '../src/text.js';
 import { buildExportArgs, exportProject } from '../src/export.js';
 import { getFfmpegConfig, configureFfmpeg } from '../src/run.js';
 const exec = promisify(execFile);
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  expect(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)).toBe(true);
+  await fs.rm(directory, { recursive: true, force: true });
+}
 async function pixels(file: string, time?: number) {
   const { stdout } = await exec(getFfmpegConfig().ffmpegPath, ['-hide_banner', '-loglevel', 'error', ...(time === undefined ? [] : ['-ss', String(time)]), '-i', file, '-frames:v', '1', '-threads', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1'], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, windowsHide: true }); return stdout as Buffer;
 }
@@ -28,7 +32,7 @@ describe('canonical FFmpeg title glyphs', () => {
       await expect(exportProject(corrupt, { outputPath: output, textCacheDirectory: cache })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', details: { field: 'timeline.tracks[0]' } });
       expect(await fs.readFile(output, 'utf8')).toBe('existing destination must survive');
       await expect(fs.stat(cache)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally { configureFfmpeg(config); await fs.rm(directory, { recursive: true, force: true }); }
+    } finally { configureFfmpeg(config); await removeTemporaryDirectory(directory); }
   });
   it('refuses incomplete prepared caption glyphs instead of producing an empty burn-in graph', () => {
     const store = EditorStore.create({ width: 320, height: 180, fps: 10 }); addCaption(store, { text: 'Required', startMs: 501, endMs: 1101 });

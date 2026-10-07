@@ -6,6 +6,11 @@ import type { Project } from '@freemier/shared';
 import { EditorError } from '@freemier/shared';
 import { EditorStore, createEmptyProject, addMediaAsset, addClip, updateClip, validateProject, saveProject, loadProject } from '../src/index.js';
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  expect(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)).toBe(true);
+  await fs.rm(directory, { recursive: true, force: true });
+}
+
 function project() {
   const store = EditorStore.create({ fps: 30000 / 1001, width: 320, height: 180 });
   const asset = addMediaAsset(store, { id: 'media_sample', path: 'nested/media file.mp4', copied: true, name: 'Sample', kind: 'video', duration: 10.017, width: 640, height: 360, fps: 30, hasAudio: true, sampleRate: 48000, videoCodec: 'h264', audioCodec: 'aac', probedAt: 0 });
@@ -95,7 +100,7 @@ describe('project input validation', () => {
     expect(rounded.sourceOut).toBeGreaterThan(10.006); expect(validateProject(store.project)).toBe(store.project);
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'freemier-validation-'));
     try { const target = path.join(directory, 'legacy.palmier'); await saveProject(p, target); expect(await loadProject(target)).toEqual(p); }
-    finally { await fs.rm(directory, { recursive: true, force: true }); }
+    finally { await removeTemporaryDirectory(directory); }
   });
   it('rejects corrupt disk input and invalid saves without altering valid saved bytes', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'freemier-validation-'));
@@ -107,7 +112,7 @@ describe('project input validation', () => {
       const missing = path.join(directory, 'no-output'); await expect(saveProject(corrupt, missing)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
       await expect(fs.stat(missing + '.freemier')).rejects.toMatchObject({ code: 'ENOENT' });
       await fs.writeFile(file, JSON.stringify(corrupt)); await expect(loadProject(target)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', details: { source: file, field: 'timeline.tracks[1].clips[0].transform.opacity.value' } });
-    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+    } finally { await removeTemporaryDirectory(directory); }
   });
   it('refuses invalid profile options and future versions before replacing a store', () => {
     for (const opts of [{ fps: NaN }, { fps: .5 }, { fps: 241 }, { width: 0 }, { height: 10.5 }]) expect(() => createEmptyProject(opts)).toThrow(EditorError);
