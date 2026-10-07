@@ -8,13 +8,28 @@ import { DEFAULT_CAPTION_STYLE, DEFAULT_TEXT_STYLE } from '@freemier/shared';
 import { EditorStore, addCaption, addTitle, removeTitle, updateCaptionTrack } from '@freemier/engine';
 import { rasterText, fontList, FONT_HASH } from '../src/text.js';
 import { buildExportArgs, exportProject } from '../src/export.js';
-import { getFfmpegConfig } from '../src/run.js';
+import { getFfmpegConfig, configureFfmpeg } from '../src/run.js';
 const exec = promisify(execFile);
 async function pixels(file: string, time?: number) {
   const { stdout } = await exec(getFfmpegConfig().ffmpegPath, ['-hide_banner', '-loglevel', 'error', ...(time === undefined ? [] : ['-ss', String(time)]), '-i', file, '-frames:v', '1', '-threads', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1'], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, windowsHide: true }); return stdout as Buffer;
 }
 function bounds(data: Buffer, width: number) { let count = 0, left = width, right = 0, top = 8192, bottom = 0, maxAlpha = 0; for (let i = 0; i < data.length; i += 4) if (data[i + 3]! > 0 && (data[i]! + data[i + 1]! + data[i + 2]!) > 20) { const p = i / 4, x = p % width, y = Math.floor(p / width); count++; left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y); maxAlpha = Math.max(maxAlpha, data[i + 3]!); } return { count, left, right, top, bottom, maxAlpha }; }
 describe('canonical FFmpeg title glyphs', () => {
+  it('rejects malformed project input before glyph/native work and leaves output untouched', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'freemier-invalid-export-'));
+    const config = getFfmpegConfig();
+    try {
+      const store = EditorStore.create({ width: 320, height: 180, fps: 10 }); addTitle(store, { text: 'Never rasterize this', start: 0, end: 1 });
+      const corrupt = { ...store.project, timeline: { ...store.project.timeline, tracks: [null] } } as never;
+      const output = path.join(directory, 'existing.mp4'), cache = path.join(directory, 'no-cache');
+      await fs.writeFile(output, 'existing destination must survive');
+      configureFfmpeg({ ffmpegPath: path.join(directory, 'missing-ffmpeg') });
+      expect(() => buildExportArgs(corrupt, { outputPath: output })).toThrow(/timeline.tracks\[0\]/);
+      await expect(exportProject(corrupt, { outputPath: output, textCacheDirectory: cache })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', details: { field: 'timeline.tracks[0]' } });
+      expect(await fs.readFile(output, 'utf8')).toBe('existing destination must survive');
+      await expect(fs.stat(cache)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally { configureFfmpeg(config); await fs.rm(directory, { recursive: true, force: true }); }
+  });
   it('refuses incomplete prepared caption glyphs instead of producing an empty burn-in graph', () => {
     const store = EditorStore.create({ width: 320, height: 180, fps: 10 }); addCaption(store, { text: 'Required', startMs: 501, endMs: 1101 });
     expect(() => buildExportArgs(store.project, { outputPath: 'out.mp4' })).toThrow(/rasterized/);

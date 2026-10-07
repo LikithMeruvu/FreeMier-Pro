@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Project } from '@freemier/shared';
-import { EditorError, PROJECT_SCHEMA_VERSION, validateMarkers, validateTitles, validateCaptions } from '@freemier/shared';
+import { EditorError } from '@freemier/shared';
+import { validateProject } from './validation.js';
+export { validateProject } from './validation.js';
 
 /**
  * Project persistence.
@@ -26,12 +28,15 @@ export function projectDir(projectPath: string): string {
 
 /** Save a project. Creates the directory tree. Writes atomically. */
 export async function saveProject(project: Project, projectPath: string): Promise<string> {
+  validateProject(project);
+  let payload: string;
+  try { payload = JSON.stringify(project, null, 2); }
+  catch { throw new EditorError('INVALID_ARGUMENT', 'Project must be JSON-serializable'); }
   const dir = projectDir(projectPath);
   await fs.mkdir(path.join(dir, CACHE_DIR), { recursive: true });
 
   const target = path.join(dir, PROJECT_FILE);
   const tmp = `${target}.tmp-${process.pid}`;
-  const payload = JSON.stringify(project, null, 2);
 
   await fs.writeFile(tmp, payload, 'utf8');
   await fs.rename(tmp, target); // atomic on the same volume
@@ -64,41 +69,6 @@ export async function loadProject(projectPath: string): Promise<Project> {
   }
 
   return validateProject(parsed, target);
-}
-
-/** Validate and narrow a parsed value into a Project. Fails loudly. */
-export function validateProject(value: unknown, source = '<memory>'): Project {
-  if (typeof value !== 'object' || value === null) {
-    throw new EditorError('INVALID_ARGUMENT', 'Project must be an object', { source });
-  }
-  const p = value as Record<string, unknown>;
-
-  if (typeof p.id !== 'string' || p.id.length === 0) {
-    throw new EditorError('INVALID_ARGUMENT', 'Project is missing a valid id', { source });
-  }
-  if (typeof p.version !== 'number') {
-    throw new EditorError('INVALID_ARGUMENT', 'Project is missing a version', { source });
-  }
-  if (p.version > PROJECT_SCHEMA_VERSION) {
-    throw new EditorError('UNSUPPORTED', 'Project was written by a newer schema version', {
-      source, found: p.version, supported: PROJECT_SCHEMA_VERSION,
-    });
-  }
-  const timeline = p.timeline as Record<string, unknown> | undefined;
-  if (!timeline || typeof timeline !== 'object') {
-    throw new EditorError('INVALID_ARGUMENT', 'Project is missing a timeline', { source });
-  }
-  if (!Array.isArray(timeline.tracks)) {
-    throw new EditorError('INVALID_ARGUMENT', 'Timeline is missing tracks', { source });
-  }
-  if (!Array.isArray(p.media)) {
-    throw new EditorError('INVALID_ARGUMENT', 'Project is missing a media array', { source });
-  }
-  if (timeline.markers !== undefined) validateMarkers(timeline.markers, timeline.fps as number);
-  if (timeline.titles !== undefined) validateTitles(timeline.titles, timeline.fps as number);
-  if (timeline.captions !== undefined) validateCaptions(timeline.captions);
-
-  return value as Project;
 }
 
 /** List project directories under a parent folder. */

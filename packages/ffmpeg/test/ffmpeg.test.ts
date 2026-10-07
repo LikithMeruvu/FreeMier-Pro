@@ -133,8 +133,8 @@ describe('buildExportArgs', () => {
     const a = addMediaAsset(store, await probeMedia(CLIP_A));
     const clip = addClip(store, { trackId: videoTrackId(store), assetId: a.id, duration: 2 });
     // Remove the asset from the library but leave the clip in place.
-    store.mutate('media', [a.id], (p) => ({ ...p, media: p.media.filter((m) => m.id !== a.id) }));
-    expect(() => buildExportArgs(store.project, { outputPath: 'x.mp4' })).toThrowError(/missing asset/i);
+    const corrupt = { ...store.project, media: store.project.media.filter((m) => m.id !== a.id) };
+    expect(() => buildExportArgs(corrupt, { outputPath: 'x.mp4' })).toThrowError(/missing asset/i);
     expect(clip.id).toBeTruthy();
   });
 });

@@ -2,7 +2,7 @@ import type { Project, Timeline, Clip, MediaAsset, Track } from '@freemier/share
 import { EditorError, evaluateTransform, validateTransformValue, effectDescriptor, formatSrt } from '@freemier/shared';
 import { animatedTransformFilter, effectFilters } from './effects.js';
 import { runFfmpeg } from './run.js';
-import { clipEnd, timelineDuration } from '@freemier/engine';
+import { clipEnd, timelineDuration, validateProject } from '@freemier/engine';
 import path from 'node:path';
 import os from 'node:os';
 import { promises as fs } from 'node:fs';
@@ -70,6 +70,7 @@ export function buildExportArgs(
   project: Project,
   opts: ExportOptions,
 ): { args: string[]; duration: number; clipCount: number } {
+  validateProject(project);
   const timeline = project.timeline;
   const captionPolicy = opts.captionPolicy ?? 'burn-in';
   if (!['burn-in', 'none', 'sidecar'].includes(captionPolicy)) throw new EditorError('INVALID_ARGUMENT', 'Unknown caption export policy');
@@ -277,6 +278,7 @@ export function buildExportArgs(
  * Streams FFmpeg's progress output so callers can drive a progress bar.
  */
 export async function exportProject(project: Project, opts: ExportOptions): Promise<ExportResult> {
+  validateProject(project);
   const titles = project.timeline.titles ?? [];
   const policy = opts.captionPolicy ?? 'burn-in';
   const captionTrack = project.timeline.captions;

@@ -125,6 +125,20 @@ afterAll(async () => {
 });
 
 describe('MCP protocol', () => {
+  it('returns field-specific load errors over stdio without replacing project or history', async () => {
+    await client.call('project_create', { name: 'Protected project', fps: 30 });
+    const marker = (await client.call('marker_add', { time: 1, label: 'History survives' })).marker as { id: string };
+    const target = path.join(workspace, 'protected.freemier'); await client.call('project_save', { path: target });
+    const file = path.join(target, 'project.json'), data = JSON.parse(await fs.readFile(file, 'utf8'));
+    data.timeline.tracks = [null]; await fs.writeFile(file, JSON.stringify(data));
+    const before = await client.call('project_info');
+    const response = await client.request('tools/call', { name: 'project_load', arguments: { path: target } });
+    const result = response.result as { isError: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(true); expect(JSON.parse(result.content[0]!.text).error).toMatchObject({ code: 'INVALID_ARGUMENT', details: { field: 'timeline.tracks[0]' } });
+    expect(await client.call('project_info')).toEqual(before);
+    expect((await client.call('undo')).undone).toBe(true); expect((await client.call('marker_list')).markers).toEqual([]);
+    expect((await client.call('redo')).redone).toBe(true); expect((await client.call('marker_list')).markers).toMatchObject([{ id: marker.id }]);
+  });
   it('initializes and lists all 58 tools with schemas', async () => {
     const tools = await client.listTools();
     expect(tools.length).toBe(58);

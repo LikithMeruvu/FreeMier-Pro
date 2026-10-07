@@ -1,5 +1,6 @@
 import type { Project, Timeline, Track, Clip } from '@freemier/shared';
 import { newProjectId, newTimelineId } from '@freemier/shared';
+import { validateProject } from './validation.js';
 
 /** The immutable state a store holds. */
 export interface EditorState {
@@ -69,7 +70,7 @@ export function createEmptyProject(opts: CreateProjectOptions = {}): Project {
     tracks: [audioTrack, videoTrack],
   };
 
-  return {
+  return validateProject({
     id: newProjectId(),
     name: opts.name ?? 'Untitled Project',
     version: 1,
@@ -77,7 +78,7 @@ export function createEmptyProject(opts: CreateProjectOptions = {}): Project {
     media: [],
     createdAt: now,
     updatedAt: now,
-  };
+  });
 }
 
 /**
@@ -98,7 +99,7 @@ export class EditorStore {
   #maxUndo: number;
 
   constructor(project: Project, maxUndo = 200) {
-    this.#state = { project, revision: 0 };
+    this.#state = { project: validateProject(project), revision: 0 };
     this.#maxUndo = maxUndo;
   }
 
@@ -147,6 +148,9 @@ export class EditorStore {
     // No-op mutations must not pollute the undo stack.
     if (nextProject === before.project) return;
 
+    // Refusal precedes history changes and notifications for every engine caller.
+    validateProject(nextProject);
+
     this.#undoStack.push(before);
     if (this.#undoStack.length > this.#maxUndo) this.#undoStack.shift();
     this.#redoStack = [];
@@ -160,6 +164,7 @@ export class EditorStore {
 
   /** Replace the entire project. Clears both stacks. */
   load(project: Project): void {
+    validateProject(project);
     this.#undoStack = [];
     this.#redoStack = [];
     this.#state = { project, revision: this.#state.revision + 1 };

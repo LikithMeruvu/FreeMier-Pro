@@ -177,6 +177,23 @@ try {
   await gesture(v1, 5.5); await click('#btn-delete'); await waitFor('edit after save', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 2); await fs.unlink(path.join(workspace, 'media', assetA.path)); await click('#btn-open'); await waitFor('GUI load restores saved sequence', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 3);
   assert.ok(path.isAbsolute((await rpc.call('media_inspect', { assetId: assetA.id })).asset.path)); check('save/load packages copied media and restores owning store after original copy removal');
   assert.equal((await rpc.call('marker_list')).markers.length, 3); assert.ok((await read()).timeline.markerPixels > 20); check('markers survive portable save/load without extending the seven-second export');
+  const projectFile = path.join(projectPath, 'project.json'), validBytes = await fs.readFile(projectFile);
+  const historyMarker = (await rpc.call('marker_add', { time: 0, label: 'Preserved load history' })).marker;
+  await waitFor('history marker reaches GUI', async () => (await rpc.call('marker_list')).markers.length === 4 && (await read()).revision === (await rpc.call('project_info')).revision);
+  const protectedInfo = await rpc.call('project_info'), protectedPaint = await read(), invalid = JSON.parse(validBytes);
+  invalid.timeline.tracks.find((t) => t.clips.length).clips[0].transform.x.keyframes = [null];
+  try {
+    await fs.writeFile(projectFile, JSON.stringify(invalid));
+    const refusal = await rpc.request('tools/call', { name: 'project_load', arguments: { path: projectPath } });
+    assert.equal(refusal.isError, true); assert.equal(JSON.parse(refusal.content[0].text).error.code, 'INVALID_ARGUMENT');
+    await click('#btn-open'); await waitFor('native invalid project error', async () => (await read()).toast.includes('Invalid project field'));
+    assert.deepEqual(await rpc.call('project_info'), protectedInfo);
+    const current = await read(); assert.equal(current.name, protectedPaint.name); assert.equal(current.revision, protectedPaint.revision); assert.equal(current.origin, protectedPaint.origin); assert.ok(current.program.luma > 10);
+    await click('#btn-undo'); await waitFor('GUI undo retained after failed load', async () => !(await rpc.call('marker_list')).markers.some((m) => m.id === historyMarker.id));
+    await click('#btn-redo'); await waitFor('GUI redo retained after failed load', async () => (await rpc.call('marker_list')).markers.some((m) => m.id === historyMarker.id));
+    await click('#btn-undo'); await waitFor('restore original markers', async () => (await rpc.call('marker_list')).markers.length === 3);
+    check('malformed project refused by MCP and native Open while decoded preview and GUI history survive');
+  } finally { await fs.writeFile(projectFile, validBytes); }
   if (!screenshotOnly) {
     await cdp.evaluate('window.__exportUpdates=[];new MutationObserver(()=>window.__exportUpdates.push(document.querySelector("#btn-export").dataset.progress)).observe(document.querySelector("#btn-export"),{attributes:true});document.querySelector("#btn-export").click();');
     await waitFor('actual GUI export', async () => { await fs.stat(output); return cdp.evaluate('!document.querySelector("#btn-export").disabled&&document.querySelector("#toast").textContent.startsWith("Exported")'); }, 120000);

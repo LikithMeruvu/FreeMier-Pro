@@ -347,7 +347,11 @@ describe('project persistence', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'palmier-test-'));
     const store = EditorStore.create();
     const bad = { ...store.project, version: 999 };
-    await saveProject(bad as never, path.join(dir, 'bad'));
+    // A future document is external input; the current writer must refuse it too.
+    const futureDir = path.join(dir, 'bad.freemier');
+    await fs.mkdir(futureDir);
+    await fs.writeFile(path.join(futureDir, 'project.json'), JSON.stringify(bad));
+    await expect(saveProject(bad as never, path.join(dir, 'bad'))).rejects.toThrowError(/newer schema/i);
     await expect(loadProject(path.join(dir, 'bad'))).rejects.toThrowError(/newer schema/i);
     await fs.rm(dir, { recursive: true, force: true });
   });
