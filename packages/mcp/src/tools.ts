@@ -15,6 +15,7 @@ import { PROFESSIONAL_TOOLS } from './professional-tools.js';
 import { MARKER_TOOLS } from './marker-tools.js';
 import { TITLE_TOOLS } from './title-tools.js';
 import { CAPTION_TOOLS } from './caption-tools.js';
+import { PRESET_TOOLS } from './preset-tools.js';
 
 /**
  * The MCP tool surface.
@@ -57,6 +58,7 @@ export const TOOLS: ToolDef[] = [
   ...MARKER_TOOLS,
   ...TITLE_TOOLS,
   ...CAPTION_TOOLS,
+  ...PRESET_TOOLS,
   {
     name: 'media_probe', title: 'Probe media',
     description: 'Inspect a media file with ffprobe without importing it or changing the project.',

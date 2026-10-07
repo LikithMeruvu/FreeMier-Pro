@@ -103,3 +103,14 @@ export function removeEffect(store: EditorStore, clipId: string, effectId: strin
   if (!clip.effects.some((e) => e.id === effectId)) throw new EditorError('NOT_FOUND', 'Effect not found', { effectId });
   return updateClip(store, clipId, { effects: clip.effects.filter((e) => e.id !== effectId) });
 }
+/** Validate every entry before a single mutation; no partial effect application. */
+export function applyEffectStack(store: EditorStore, clipId: string, entries: readonly Omit<Effect, 'id'>[], mode: 'append' | 'replace' = 'append'): Clip {
+  if (mode !== 'append' && mode !== 'replace') throw new EditorError('INVALID_ARGUMENT', 'Expected append or replace');
+  const { clip } = editable(store, clipId);
+  if (!Array.isArray(entries) || !entries.length || entries.length > 32 || (mode === 'append' && clip.effects.length + entries.length > 32)) throw new EditorError('INVALID_ARGUMENT', 'Expected a nonempty stack with maximum 32 resulting effects');
+  const effects = entries.map((entry) => {
+    if (typeof entry.enabled !== 'boolean') throw new EditorError('INVALID_ARGUMENT', 'Effect enabled must be boolean');
+    return { id: `fx_${newClipId()}`, type: entry.type, enabled: entry.enabled, params: validateEffect(store, clipId, entry.type, entry.params) };
+  });
+  return updateClip(store, clipId, { effects: [...(mode === 'append' ? clip.effects : []), ...effects] });
+}

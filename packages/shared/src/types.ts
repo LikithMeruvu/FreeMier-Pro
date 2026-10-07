@@ -176,6 +176,8 @@ export interface Project {
   readonly version: number;
   readonly timeline: Timeline;
   readonly media: readonly MediaAsset[];
+  /** Portable normalized effect presets, optional in schema-1 projects. */
+  readonly effectPresets?: readonly import('./presets.js').ImportedEffectPreset[];
   /** Created at epoch ms. */
   readonly createdAt: number;
   /** Last mutation at epoch ms. */

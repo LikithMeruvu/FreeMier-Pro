@@ -121,7 +121,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   client?.kill();
-  if (workspace) await fs.rm(workspace, { recursive: true, force: true });
+  if (workspace) { expect(path.resolve(workspace).startsWith(path.resolve(os.tmpdir()) + path.sep)).toBe(true); await fs.rm(workspace, { recursive: true, force: true }); }
 });
 
 describe('MCP protocol', () => {
@@ -139,9 +139,9 @@ describe('MCP protocol', () => {
     expect((await client.call('undo')).undone).toBe(true); expect((await client.call('marker_list')).markers).toEqual([]);
     expect((await client.call('redo')).redone).toBe(true); expect((await client.call('marker_list')).markers).toMatchObject([{ id: marker.id }]);
   });
-  it('initializes and lists all 58 tools with schemas', async () => {
+  it('initializes and lists all 67 tools with schemas', async () => {
     const tools = await client.listTools();
-    expect(tools.length).toBe(58);
+    expect(tools.length).toBe(67);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z_]+$/);
       expect(t.description.length).toBeGreaterThan(10);
@@ -161,6 +161,7 @@ describe('MCP protocol', () => {
       'marker_add', 'marker_update', 'marker_remove', 'marker_list',
       'font_list', 'title_add', 'title_update', 'title_remove', 'title_list',
       'caption_add', 'caption_update', 'caption_remove', 'captions_list', 'captions_import', 'captions_export', 'caption_track_update',
+      'effect_preset_inspect', 'effect_preset_import', 'effect_preset_list', 'effect_preset_get', 'effect_preset_capture', 'effect_preset_export', 'effect_preset_apply', 'effect_preset_remove', 'import_capabilities',
     ]) {
       expect(names, `missing tool: ${required}`).toContain(required);
     }
@@ -187,6 +188,31 @@ describe('MCP protocol', () => {
 });
 
 describe('agent edit workflow', () => {
+  it('inspects/imports/describes/applies/exports portable presets over real stdio', async () => {
+    await client.call('project_create', { name: 'Portable presets', fps: 10, width: 320, height: 180 });
+    const payload = { format: 'freemier-effect-preset', version: 1, name: 'Warm film', description: 'Golden color with adjustable amount', author: 'Independent fixture', tags: ['warm'], media: 'video', effects: [{ type: 'sepia', enabled: true, params: { amount: .6 } }] };
+    const file = path.join(workspace, 'Warm.fmfx.json'); await fs.writeFile(file, JSON.stringify(payload));
+    const before = await client.call('project_info'), inspected = await client.call('effect_preset_inspect', { path: file }); expect(await client.call('project_info')).toEqual(before);
+    const preset = (await client.call('effect_preset_import', { path: file })).preset as { id: string; sha256: string }; expect(inspected.preset).toMatchObject({ id: preset.id, descriptionSource: 'declared-author-text' });
+    const importedInfo = await client.call('project_info'); await client.call('effect_preset_import', { content: JSON.stringify(payload) }); expect(await client.call('project_info')).toEqual(importedInfo);
+    expect((await client.call('effect_preset_list', { query: 'Golden' })).presets).toMatchObject([{ id: preset.id }]);
+    expect((await client.call('effect_preset_get', { presetId: preset.id })).preset).toMatchObject({ effects: [{ descriptor: { params: { amount: { min: 0, max: 1 } } } }] });
+    const asset = (await client.call('media_import', { path: path.join(FIXTURES, 'clipB.mp4') })).asset as { id: string };
+    const clip = (await client.call('clip_add', { trackId: 'trk_video_1', assetId: asset.id, duration: 2 })).clip as { id: string };
+    const applied = await client.call('effect_preset_apply', { presetId: preset.id, clipId: clip.id }); expect(applied.clip).toMatchObject({ effects: [{ type: 'sepia', enabled: true, params: { amount: .6 } }] });
+    await client.call('undo'); expect((await client.call('effect_list', { clipId: clip.id })).effects).toEqual([]); await client.call('redo');
+    const captured = await client.call('effect_preset_capture', { clipId: clip.id, name: 'Copy', description: 'Round trip' }); expect(JSON.parse(captured.content as string).effects).toEqual(payload.effects);
+    const output = path.join(workspace, 'Export.fmfx.json'); const exported = await client.call('effect_preset_export', { presetId: preset.id, path: output }); expect(JSON.parse(await fs.readFile(output, 'utf8'))).toEqual(payload);
+    await expect(client.call('effect_preset_export', { presetId: preset.id, path: output })).rejects.toMatchObject({ code: 'IO_ERROR' }); expect(await fs.readFile(output, 'utf8')).toBe(exported.content);
+    await client.call('effect_preset_remove', { presetId: preset.id }); expect((await client.call('effect_preset_list')).presets).toEqual([]); expect((await client.call('effect_list', { clipId: clip.id })).effects).toHaveLength(1);
+  });
+  it('rejects ambiguous, malformed, invalid-UTF8 and oversized preset sources atomically over stdio', async () => {
+    const before = await client.call('project_info'), badUtf8 = path.join(workspace, 'bad-utf8.json'), huge = path.join(workspace, 'huge.json');
+    await fs.writeFile(badUtf8, Buffer.from([0xff, 0xfe])); await fs.writeFile(huge, ' '.repeat(65537));
+    for (const args of [{}, { content: '{}', path: badUtf8 }, { content: '{' }, { path: badUtf8 }, { path: huge }, { path: workspace }]) await expect(client.call('effect_preset_import', args)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await client.call('project_info')).toEqual(before);
+    expect((await client.call('import_capabilities')).imports).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'effect-preset', executablePlugins: false })]));
+  });
   it('edits and exports a real title-only composition through standard stdio', async () => {
     await client.call('project_create', { name: 'Titles', width: 320, height: 180, fps: 10 });
     const fonts = await client.call('font_list'); expect((fonts.fonts as Array<{ bundled: boolean }>)[0]!.bundled).toBe(true);

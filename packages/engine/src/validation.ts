@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { validateEffectPresetLibrary } from './presets.js';
 import type { Project, Clip, MediaAsset, Transform } from '@freemier/shared';
 import { EditorError, PROJECT_SCHEMA_VERSION, EASINGS, TRANSFORM_LIMITS, EFFECT_CATALOG,
   validateEffectParams, validateMarkers, validateTitles, validateCaptions } from '@freemier/shared';
@@ -131,5 +132,6 @@ export function validateProject(value: unknown, source = '<memory>'): Project {
   if (timeline.markers !== undefined) extension('timeline.markers', () => validateMarkers(timeline.markers, fps));
   if (timeline.titles !== undefined) extension('timeline.titles', () => validateTitles(timeline.titles, fps));
   if (timeline.captions !== undefined) extension('timeline.captions', () => validateCaptions(timeline.captions));
+  if (p.effectPresets !== undefined) extension('effectPresets', () => validateEffectPresetLibrary(p.effectPresets));
   return value as Project;
 }

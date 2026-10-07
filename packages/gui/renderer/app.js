@@ -3,6 +3,7 @@ import { EFFECT_CATALOG, createColorProcessor, fadeEnvelope } from '@freemier/sh
 import { frameTimecode, parseFrameTimecode } from '@freemier/shared/timecode';
 import { textRasterPayload } from '@freemier/shared/text';
 import { captionDuration, captionFrames } from '@freemier/shared/captions';
+import { describeEffectPreset } from '@freemier/shared/presets';
 
 const BRIDGE = 'http://127.0.0.1:' + (new URLSearchParams(location.search).get('bridge') ?? '4317');
 const api = window.freemier ?? window.palmier;
@@ -46,7 +47,7 @@ function setHead(t, inspector = true) {
   const scroll = $('timeline-scroll'), x = playhead * pps;
   if (x < scroll.scrollLeft || x > scroll.scrollLeft + scroll.clientWidth - 8) scroll.scrollLeft = Math.max(0, x - scroll.clientWidth / 2);
 }
-function select(id) { selectedClipId = id; renderInspector(); renderTimeline(); }
+function select(id) { selectedClipId = id; renderInspector(); renderTimeline(); if (browser === 'presets') renderPresets($('bin-search').value.toLowerCase()); }
 function applyState(next, nextRevision, history = {}) {
   if (!next?.timeline) return;
   if (history.eventEpoch !== undefined && history.eventSequence !== undefined) {
@@ -88,6 +89,7 @@ function renderMediaBin() {
   const query = $('bin-search').value.toLowerCase();
   $('media-bin').hidden = browser !== 'project'; $('effects-browser').hidden = browser !== 'effects';
   $('markers-panel').hidden = browser !== 'markers';
+  $('presets-panel').hidden = browser !== 'presets'; renderPresets(query);
   $('bin-search').placeholder = browser === 'project' ? 'Search media' : browser === 'effects' ? 'Search effects' : 'Search markers';
   $('bin-search').setAttribute('aria-label', $('bin-search').placeholder);
   $('media-bin').className = 'media-bin ' + (grid ? 'grid' : 'list');
@@ -98,6 +100,7 @@ function renderMediaBin() {
   $('captions-panel').hidden = browser !== 'captions'; renderCaptions(query);
   if (browser === 'titles') { $('bin-search').placeholder = 'Search titles'; $('bin-count').textContent = (project.timeline.titles ?? []).filter((t) => t.text.toLowerCase().includes(query)).length + ' items'; }
   if (browser === 'captions') { $('bin-search').placeholder = 'Search captions'; $('bin-count').textContent = (project.timeline.captions?.cues ?? []).filter((c) => c.text.toLowerCase().includes(query)).length + ' cues'; }
+  if (browser === 'presets') { $('bin-search').placeholder = 'Search presets'; $('bin-count').textContent = filteredPresets(query).length + ' presets'; }
   $('media-bin').replaceChildren(...assets.map((asset) => {
     const item = node('div', 'media-item' + (asset.id === sourceAssetId ? ' selected' : '')); item.dataset.assetId = asset.id; item.draggable = true; item.tabIndex = 0;
     const img = node('img', 'media-thumb'); img.alt = asset.name; if (thumbs.has(asset.id)) img.src = thumbs.get(asset.id); else void thumbnail(asset, img);
@@ -117,6 +120,28 @@ function renderMediaBin() {
       tile.append(node('span', 'effect-icon', 'fx'), label); $('effects-browser').append(tile);
     }
   }
+}
+function filteredPresets(query = '') {
+  return (project?.effectPresets ?? []).filter(({ document: p }) => [p.name, p.description, p.author, ...p.tags].join(' ').toLowerCase().includes(query));
+}
+function renderPresets(query = '') {
+  const list = $('preset-list'); list.replaceChildren();
+  $('preset-capture').disabled = !find()?.clip.effects.length;
+  for (const preset of filteredPresets(query)) {
+    const p = preset.document, info = describeEffectPreset(p), card = node('div', 'text-card preset-card'); card.dataset.presetId = preset.id;
+    card.append(node('strong', '', p.name), node('p', 'preset-description', p.description || 'No author description supplied'), node('small', '', [p.media.toUpperCase(), p.author, ...p.tags].filter(Boolean).join(' · ')));
+    const details = node('details'); details.append(node('summary', '', 'Effects, controls and compatibility'));
+    details.append(node('pre', '', JSON.stringify({ sha256: preset.sha256, descriptionSource: info.descriptionSource, effects: info.effects, compatibility: info.compatibility }, null, 2))); card.append(details);
+    const row = node('div', 'button-row');
+    for (const mode of ['append', 'replace']) {
+      const apply = button(mode === 'append' ? 'Append' : 'Replace', mode + ' this preset on the selected clip', () => command('effect_preset_apply', { presetId: preset.id, clipId: selectedClipId, mode })); apply.dataset.presetApply = mode;
+      const selected = find(); apply.disabled = !selected || selected.track.locked || selected.track.kind !== p.media; row.append(apply);
+    }
+    row.append(button('JSON', 'Show portable JSON', async () => { const result = await command('effect_preset_export', { presetId: preset.id }); if (result) $('preset-json').value = result.content; }));
+    row.append(button('Save file', 'Create a new .fmfx.json file', async () => { const path = await api.pickPresetSavePath(); if (path && await command('effect_preset_export', { presetId: preset.id, path })) toast('Preset file saved'); }));
+    row.append(button('×', 'Remove imported preset; applied effects remain', () => command('effect_preset_remove', { presetId: preset.id }))); card.append(row); list.append(card);
+  }
+  if (!list.children.length) list.append(node('div', 'empty', 'Import a portable effect preset, or capture a selected clip stack.'));
 }
 function renderTitles(query = '') {
   const list = $('title-list'); list.replaceChildren();
@@ -528,6 +553,10 @@ $('caption-name').addEventListener('change', () => command('caption_track_update
 $('caption-enabled').addEventListener('change', () => command('caption_track_update', { enabled: $('caption-enabled').checked }));
 $('caption-import').addEventListener('click', () => command('captions_import', { content: $('caption-srt').value, mode: 'replace' }));
 $('caption-export').addEventListener('click', async () => { const result = await command('captions_export'); if (result) $('caption-srt').value = result.content; });
+$('preset-import-file').addEventListener('click', async () => { const path = await api.pickPreset(); if (path) await command('effect_preset_import', { path }); });
+$('preset-import-json').addEventListener('click', () => command('effect_preset_import', { content: $('preset-json').value }));
+$('preset-inspect').addEventListener('click', async () => { const result = await command('effect_preset_inspect', { content: $('preset-json').value }); if (result) $('preset-inspection').textContent = JSON.stringify(result.preset, null, 2); });
+$('preset-capture').addEventListener('click', async () => { const result = await command('effect_preset_capture', { clipId: selectedClipId, name: $('preset-name').value || 'Captured stack', description: $('preset-description').value }); if (result) $('preset-json').value = result.content; });
 $('marker-prev').addEventListener('click', () => navigateMarker(-1)); $('marker-next').addEventListener('click', () => navigateMarker(1));
 document.addEventListener('keydown', (event) => {
   if (event.target.closest?.('input,textarea,select,[contenteditable=true]')) return;

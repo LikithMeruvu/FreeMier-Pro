@@ -63,10 +63,12 @@ let server, gui, cdp, workspace, serverError = '', guiError = '';
 try {
   await fs.mkdir(path.join(ROOT, '.tmp'), { recursive: true }); workspace = await fs.mkdtemp(path.join(ROOT, '.tmp/live-'));
   const port = await freePort(), debugPort = await freePort(), output = path.join(workspace, 'gui-export.mp4'), projectPath = path.join(workspace, 'Acceptance.freemier');
-  const env = { ...process.env, FREEMIER_WORKSPACE: workspace, FREEMIER_BRIDGE_PORT: String(port), FREEMIER_TEST_MODE: '1', FREEMIER_TEST_DIALOGS: JSON.stringify({ media: [path.join(ROOT, 'fixtures/media/clipB.mp4')], output, project: projectPath }) }; delete env.ELECTRON_RUN_AS_NODE;
+  const presetFile = path.join(workspace, 'Sepia.fmfx.json'), presetOutput = path.join(workspace, 'Saved.fmfx.json');
+  await fs.writeFile(presetFile, JSON.stringify({ format: 'freemier-effect-preset', version: 1, name: 'Imported warm image', description: 'Independent golden tone with one adjustable amount', author: 'Synthetic acceptance', tags: ['golden'], media: 'video', effects: [{ type: 'sepia', enabled: true, params: { amount: 1 } }] }));
+  const env = { ...process.env, FREEMIER_WORKSPACE: workspace, FREEMIER_BRIDGE_PORT: String(port), FREEMIER_TEST_MODE: '1', FREEMIER_TEST_DIALOGS: JSON.stringify({ media: [path.join(ROOT, 'fixtures/media/clipB.mp4')], output, project: projectPath, preset: presetFile, presetOutput }) }; delete env.ELECTRON_RUN_AS_NODE;
   server = spawn(process.execPath, [path.join(ROOT, 'packages/mcp/dist/cli.js')], { cwd: ROOT, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); server.stderr.on('data', (d) => serverError += d);
   const rpc = new Rpc(server); await rpc.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'professional-electron-acceptance', version: '2' } }); server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  const tools = (await rpc.request('tools/list')).tools; assert.equal(tools.length, 58); check('real stdio handshake discovers 58 tools', { count: tools.length });
+  const tools = (await rpc.request('tools/list')).tools; assert.equal(tools.length, 67); check('real stdio handshake discovers 67 tools', { count: tools.length });
   await waitFor('owning bridge', async () => (await fetch('http://127.0.0.1:' + port + '/health')).ok);
   await rpc.call('project_create', { name: 'Framecraft · Launch Film', fps: 30, width: 640, height: 360 });
   gui = spawn(ELECTRON, [path.join(ROOT, 'packages/gui'), '--remote-debugging-port=' + debugPort, '--remote-debugging-address=127.0.0.1'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); gui.stdout.on('data', (d) => guiError += d); gui.stderr.on('data', (d) => guiError += d);
@@ -102,6 +104,7 @@ try {
   const second = (await rpc.call('clip_add', { trackId: v1, assetId: assetB.id, start: 3, duration: 2, label: '02  Product detail' })).clip;
   await waitFor('frame timecode', async () => (await read()).timecode.endsWith('/ 00:00:05:00')); check('native GUI import edits the owning MCP library');
   async function point(trackId, time) {
+    await waitFor('timeline snapshot reaches renderer before gesture', async () => (await read()).revision === (await rpc.call('project_info')).revision);
     await waitFor('painted track header ' + trackId, () => cdp.evaluate('!!document.querySelector(".track-header[data-track-id=' + trackId + ']")'));
     return cdp.evaluate('(()=>{const c=document.querySelector("#timeline"),s=document.querySelector("#timeline-scroll"),i=[...document.querySelectorAll(".track-header")].findIndex(t=>t.dataset.trackId===' + JSON.stringify(trackId) + '),y=Number(c.dataset.rulerHeight)+i*Number(c.dataset.trackHeight)+30;if(y<s.scrollTop||y>s.scrollTop+s.clientHeight-8)s.scrollTop=Math.max(0,y-s.clientHeight/2);const x=c._xOf(' + time + ');if(x<s.scrollLeft||x>s.scrollLeft+s.clientWidth-8)s.scrollLeft=Math.max(0,x-s.clientWidth/2);const r=c.getBoundingClientRect();return {x:r.left+x-s.scrollLeft,y:r.top+y-s.scrollTop};})()');
   }
@@ -137,6 +140,21 @@ try {
   await rpc.call('clip_add', { trackId: v2, assetId: assetB.id, start: 5, duration: 2, label: 'Detail alternate' });
   await gesture(v1, .5); await click('[data-browser="effects"]'); await click('[data-effect-type="grayscale"]');
   await waitFor('real grayscale preview', async () => { const s = await read(); return (await rpc.call('clip_inspect', { clipId: first.id })).clip.effects.some((e) => e.type === 'grayscale') && s.program.luma > 10 && s.program.spread < .1; }); check('effects browser creates real grayscale pixels in Program');
+  await click('[data-browser="presets"]'); await input('#preset-name', 'Captured monochrome'); await input('#preset-description', 'Color removal for a documentary'); await click('#preset-capture');
+  await waitFor('captured JSON', () => cdp.evaluate('document.querySelector("#preset-json").value.includes("Captured monochrome")'));
+  const inspectRevision = (await rpc.call('project_info')).revision; await click('#preset-inspect'); await waitFor('descriptive dry-run', () => cdp.evaluate('document.querySelector("#preset-inspection").textContent.includes("declared-author-text")')); assert.equal((await rpc.call('project_info')).revision, inspectRevision);
+  await click('#preset-import-json'); await waitFor('GUI captured preset import', async () => (await rpc.call('effect_preset_list')).presets.length === 1);
+  await click('#preset-import-file'); const importedPreset = await waitFor('native file import described through MCP', async () => (await rpc.call('effect_preset_list', { query: 'golden' })).presets[0]);
+  assert.equal(importedPreset.descriptionSource, 'declared-author-text'); assert.equal(importedPreset.effects[0].descriptor.params.amount.max, 1);
+  await waitFor('imported preset card', () => cdp.evaluate('!!document.querySelector("[data-preset-id=' + importedPreset.id + ']")'));
+  const presetCard = '[data-preset-id="' + importedPreset.id + '"]'; await click(presetCard + ' button[data-preset-apply="replace"]');
+  await waitFor('preset produces actual sepia Program pixels', async () => (await read()).program.spread > 5 && (await rpc.call('effect_list', { clipId: first.id })).effects[0]?.type === 'sepia');
+  await click('#btn-undo'); await waitFor('preset undo restores grayscale pixels', async () => (await read()).program.spread < .1); await click('#btn-redo'); await waitFor('preset redo restores sepia pixels', async () => (await read()).program.spread > 5); await click('#btn-undo'); await waitFor('preset restores original stack', async () => (await read()).program.spread < .1);
+  await click(presetCard + ' button[title="Create a new .fmfx.json file"]'); await waitFor('GUI file export', async () => { try { return JSON.parse(await fs.readFile(presetOutput, 'utf8')).name === importedPreset.name; } catch { return false; } });
+  check('GUI preset capture/inspect/import/export uses descriptive standard MCP and decoded Program/history');
+  await rpc.call('effect_preset_apply', { presetId: importedPreset.id, clipId: first.id, mode: 'replace' }); await waitFor('MCP preset changes native preview', async () => (await read()).program.spread > 5); await rpc.call('undo'); await waitFor('MCP preset undo', async () => (await read()).program.spread < .1);
+  assert.equal(cdp.loads, loads); check('MCP imported preset application updates actual Electron without reload');
+  await click('[data-browser="effects"]');
   await click('#btn-start'); await input('input[aria-label="Opacity"]', .2); await waitFor('opacity static', async () => (await rpc.call('clip_inspect', { clipId: first.id })).clip.transform.opacity.value === .2); await click('[data-key-property="opacity"]'); await waitFor('first key', async () => (await rpc.call('clip_inspect', { clipId: first.id })).clip.transform.opacity.keyframes.length === 1);
   const dark = (await read()).program.luma; await input('#timecode-input', '00:00:01:00'); await input('input[aria-label="Opacity"]', 1);
   await waitFor('second key and brighter preview', async () => (await rpc.call('clip_inspect', { clipId: first.id })).clip.transform.opacity.keyframes.length === 2 && (await read()).program.luma > dark * 3);
@@ -172,10 +190,11 @@ try {
   await click('[data-marker-jump="' + hook.id + '"]'); await waitFor('hook decoded after marker undo', async () => (await read()).program.luma > 10); await click('[data-browser="project"]');
   check('MCP marker flags, GUI edit/create/delete/undo and navigation use fixed sequence frames');
   const openingTitle = (await rpc.call('title_add', { text: 'FreeMier Pro\nLaunch film', start: 0, end: 3, style: { fontSize: 26, x: .08, y: .88, align: 'left', verticalAlign: 'bottom', backgroundOpacity: .5, padding: 7 } })).title;
-  await waitFor('MCP title receives rendered glyph preview', () => cdp.evaluate('document.querySelector("#preview-quality").textContent==="Shared CPU preview"&&document.querySelectorAll(".text-card").length===1'));
+  await waitFor('MCP title receives rendered glyph preview', () => cdp.evaluate('document.querySelector("#preview-quality").textContent==="Shared CPU preview"&&document.querySelectorAll(".text-card[data-title-id]").length===1'));
   await click('#btn-save'); await waitFor('portable GUI save', async () => (await fs.stat(path.join(projectPath, 'project.json'))).size > 100); const saved = JSON.parse(await fs.readFile(path.join(projectPath, 'project.json'), 'utf8')); assert.ok(saved.media.find((m) => m.id === assetA.id).copied); assert.ok((await fs.stat(path.join(projectPath, 'media', saved.media.find((m) => m.id === assetA.id).path))).size > 1000);
   await gesture(v1, 5.5); await click('#btn-delete'); await waitFor('edit after save', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 2); await fs.unlink(path.join(workspace, 'media', assetA.path)); await click('#btn-open'); await waitFor('GUI load restores saved sequence', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 3);
   assert.ok(path.isAbsolute((await rpc.call('media_inspect', { assetId: assetA.id })).asset.path)); check('save/load packages copied media and restores owning store after original copy removal');
+  assert.equal((await rpc.call('effect_preset_list')).presets.length, 2);
   assert.equal((await rpc.call('marker_list')).markers.length, 3); assert.ok((await read()).timeline.markerPixels > 20); check('markers survive portable save/load without extending the seven-second export');
   const projectFile = path.join(projectPath, 'project.json'), validBytes = await fs.readFile(projectFile);
   const historyMarker = (await rpc.call('marker_add', { time: 0, label: 'Preserved load history' })).marker;

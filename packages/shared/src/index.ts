@@ -8,3 +8,4 @@ export * from './timecode.js';
 export * from './text.js';
 export * from './captions.js';
 export * from './srt.js';
+export * from './presets.js';

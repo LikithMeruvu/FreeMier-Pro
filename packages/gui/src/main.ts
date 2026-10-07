@@ -32,7 +32,7 @@ let mcpStdioAttached = false;
 let owningWorkspace = WORKSPACE;
 // Native dialog selection is the only test substitution. Editing/rendering/export stay real.
 const testDialogs = process.env.FREEMIER_TEST_MODE === '1'
-  ? JSON.parse(process.env.FREEMIER_TEST_DIALOGS ?? '{}') as { media?: string[]; output?: string; project?: string }
+  ? JSON.parse(process.env.FREEMIER_TEST_DIALOGS ?? '{}') as { media?: string[]; output?: string; project?: string; preset?: string; presetOutput?: string }
   : null;
 
 /** Probe whether a bridge is already listening on the preferred port. */
@@ -229,6 +229,16 @@ ipcMain.handle('dialog:openProject', async () => {
   if (testDialogs) return testDialogs.project ?? null;
   const result = await dialog.showOpenDialog({ title: 'Open .freemier or legacy .palmier project', properties: ['openDirectory'] });
   return result.canceled ? null : result.filePaths[0];
+});
+ipcMain.handle('dialog:pickPreset', async () => {
+  if (testDialogs) return testDialogs.preset ?? null;
+  const result = await dialog.showOpenDialog({ title: 'Import FreeMier effect preset (.fmfx.json)', properties: ['openFile'], filters: [{ name: 'FreeMier effect preset JSON', extensions: ['json'] }] });
+  return result.canceled ? null : result.filePaths[0];
+});
+ipcMain.handle('dialog:savePreset', async () => {
+  if (testDialogs) return testDialogs.presetOutput ?? null;
+  const result = await dialog.showSaveDialog({ title: 'Export FreeMier effect preset (new file)', defaultPath: path.join(owningWorkspace, 'Preset.fmfx.json'), filters: [{ name: 'FreeMier effect preset JSON', extensions: ['json'] }] });
+  return result.canceled ? null : result.filePath;
 });
 
 app.whenReady().then(boot).catch((err) => {

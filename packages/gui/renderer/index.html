@@ -24,9 +24,19 @@
   </div>
   <main id="layout">
     <aside id="left" class="panel">
-      <div class="panel-tabs"><div class="library-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><button data-browser="markers">Markers</button><button data-browser="titles">Titles</button><button data-browser="captions">Captions</button></div><button id="btn-import" title="Import media">＋</button></div>
+      <div class="panel-tabs"><div class="library-tabs"><button data-browser="project" class="active">Project</button><button data-browser="effects">Effects</button><button data-browser="presets">Presets</button><button data-browser="markers">Markers</button><button data-browser="titles">Titles</button><button data-browser="captions">Captions</button></div><button id="btn-import" title="Import media">＋</button></div>
       <div class="search-row"><input id="bin-search" type="search" placeholder="Search media" aria-label="Search media" /><button id="bin-view" title="Toggle list/grid view">▦</button></div>
       <div id="media-bin" class="media-bin grid"></div><div id="effects-browser" class="effects-browser" hidden></div>
+      <div id="presets-panel" class="markers-panel" hidden>
+        <button id="preset-import-file" class="accent">Import .fmfx.json file</button>
+        <div class="marker-policy">Portable built-in effect stacks · author descriptions · CPU export</div>
+        <input id="preset-name" aria-label="Captured preset name" placeholder="Preset name" maxlength="128" />
+        <textarea id="preset-description" aria-label="Captured preset description" placeholder="Describe the effect and its intended use" maxlength="4096" rows="2"></textarea>
+        <button id="preset-capture">Capture selected clip settings</button>
+        <textarea id="preset-json" aria-label="Effect preset JSON" placeholder="Paste portable preset JSON or capture a clip" rows="5"></textarea>
+        <div class="button-row"><button id="preset-inspect">Inspect JSON</button><button id="preset-import-json">Import JSON</button></div>
+        <pre id="preset-inspection" aria-label="Preset inspection"></pre><div id="preset-list"></div>
+      </div>
       <div id="markers-panel" class="markers-panel" hidden><div class="marker-create"><input id="marker-label" aria-label="New marker label" placeholder="Marker label" maxlength="120" /><button id="marker-create" class="accent" title="Add marker at the sequence playhead">＋ At playhead</button></div><div class="marker-policy">Fixed sequence markers · do not extend export</div><div id="marker-list"></div></div>
       <div id="titles-panel" class="markers-panel" hidden><div class="marker-create"><textarea id="title-text" aria-label="New title text" placeholder="Title text" maxlength="4096" rows="2"></textarea><button id="title-create" class="accent">＋ Three seconds at playhead</button></div><div class="marker-policy">Noto Sans · Latin/Greek/Cyrillic · shared rendered glyphs</div><div id="title-list"></div></div>
       <div id="captions-panel" class="markers-panel" hidden><div class="marker-create"><textarea id="caption-text" aria-label="New caption text" placeholder="Subtitle text" maxlength="4096" rows="2"></textarea><button id="caption-create" class="accent">＋ Two seconds at playhead</button></div><label class="control-row">Track <span id="caption-track-state"></span><button id="caption-lock" type="button">Lock</button></label><label class="control-row">Name <input id="caption-name" aria-label="Caption track name" maxlength="120"></label><label class="control-row">Show captions <input id="caption-enabled" aria-label="Show captions" type="checkbox"></label><div class="marker-policy">Integer millisecond cues · SRT · hiding captions preserves sequence duration</div><textarea id="caption-srt" aria-label="SRT import or export" placeholder="Paste SRT to import; export fills this field" rows="5"></textarea><div class="button-row"><button id="caption-import">Import SRT</button><button id="caption-export">Export SRT</button></div><div id="caption-list"></div></div>

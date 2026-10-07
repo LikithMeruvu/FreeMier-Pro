@@ -12,6 +12,8 @@ const api = {
   pickMedia: () => ipcRenderer.invoke('dialog:pickMedia'),
   pickProjectSavePath: () => ipcRenderer.invoke('dialog:saveProject'),
   pickProjectOpenPath: () => ipcRenderer.invoke('dialog:openProject'),
+  pickPreset: () => ipcRenderer.invoke('dialog:pickPreset'),
+  pickPresetSavePath: () => ipcRenderer.invoke('dialog:savePreset'),
   onExportProgress: (cb) => ipcRenderer.on('export:progress', (_event, progress) => cb(progress)),
 
   /** Report renderer state so an automated check can verify live sync. */

@@ -4,19 +4,19 @@ export interface EffectParameter {
   type: 'number' | 'string'; default: number | string; min?: number; max?: number; choices?: readonly string[];
 }
 export interface EffectDescriptor {
-  type: string; name: string; media: 'video' | 'audio'; params: Record<string, EffectParameter>;
+  type: string; name: string; description: string; media: 'video' | 'audio'; params: Record<string, EffectParameter>;
   export: 'cpu'; preview: 'css-approximate' | 'envelope' | 'pixel-processing-required';
 }
 const numeric = (value: number, min: number, max: number): EffectParameter => ({ type: 'number', default: value, min, max });
 const fade = { direction: { type: 'string', default: 'in', choices: ['in', 'out'] } as EffectParameter, start: numeric(0, 0, 86400), duration: numeric(1, 1 / 240, 3600) };
 export const EFFECT_CATALOG: readonly EffectDescriptor[] = [
-  { type: 'color_adjust', name: 'Color adjustment', media: 'video', params: { brightness: numeric(0, -1, 1), contrast: numeric(1, 0, 2), saturation: numeric(1, 0, 3), gamma: numeric(1, .1, 10) }, export: 'cpu', preview: 'pixel-processing-required' },
-  { type: 'grayscale', name: 'Grayscale', media: 'video', params: {}, export: 'cpu', preview: 'pixel-processing-required' },
-  { type: 'sepia', name: 'Sepia', media: 'video', params: { amount: numeric(1, 0, 1) }, export: 'cpu', preview: 'pixel-processing-required' },
-  { type: 'blur', name: 'Gaussian blur', media: 'video', params: { radius: numeric(3, 0, 20) }, export: 'cpu', preview: 'css-approximate' },
-  { type: 'sharpen', name: 'Sharpen', media: 'video', params: { amount: numeric(.5, 0, 2) }, export: 'cpu', preview: 'pixel-processing-required' },
-  { type: 'video_fade', name: 'Video fade', media: 'video', params: fade, export: 'cpu', preview: 'envelope' },
-  { type: 'audio_fade', name: 'Audio fade', media: 'audio', params: fade, export: 'cpu', preview: 'envelope' },
+  { type: 'color_adjust', name: 'Color adjustment', description: 'Offset brightness, contrast around mid-gray, inverse gamma, then Rec.709 RGB saturation. Values clamp to the supported normalized range.', media: 'video', params: { brightness: numeric(0, -1, 1), contrast: numeric(1, 0, 2), saturation: numeric(1, 0, 3), gamma: numeric(1, .1, 10) }, export: 'cpu', preview: 'pixel-processing-required' },
+  { type: 'grayscale', name: 'Grayscale', description: 'Replace RGB with weighted Rec.709 luma while retaining alpha.', media: 'video', params: {}, export: 'cpu', preview: 'pixel-processing-required' },
+  { type: 'sepia', name: 'Sepia', description: 'Mix original RGB with a fixed golden sepia matrix; amount 0 preserves original and 1 applies the full matrix.', media: 'video', params: { amount: numeric(1, 0, 1) }, export: 'cpu', preview: 'pixel-processing-required' },
+  { type: 'blur', name: 'Gaussian blur', description: 'Spatial Gaussian softening with radius in output pixels. Live browser preview is an approximation of the CPU filter.', media: 'video', params: { radius: numeric(3, 0, 20) }, export: 'cpu', preview: 'css-approximate' },
+  { type: 'sharpen', name: 'Sharpen', description: 'CPU spatial unsharp processing with bounded amount. Live browser spatial processing does not establish identical exported pixels.', media: 'video', params: { amount: numeric(.5, 0, 2) }, export: 'cpu', preview: 'pixel-processing-required' },
+  { type: 'video_fade', name: 'Video fade', description: 'Linear alpha envelope from clip-local start over duration seconds. Direction in raises alpha; out lowers alpha.', media: 'video', params: fade, export: 'cpu', preview: 'envelope' },
+  { type: 'audio_fade', name: 'Audio fade', description: 'Linear audio gain envelope from clip-local start over duration seconds. Direction in raises gain; out lowers gain.', media: 'audio', params: fade, export: 'cpu', preview: 'envelope' },
 ];
 export function effectDescriptor(type: string): EffectDescriptor {
   const descriptor = EFFECT_CATALOG.find((e) => e.type === type);

@@ -11,6 +11,7 @@
     "./text": { "types": "./dist/text.d.ts", "default": "./dist/text.js" },
     "./srt": { "types": "./dist/srt.d.ts", "default": "./dist/srt.js" },
     "./captions": { "types": "./dist/captions.d.ts", "default": "./dist/captions.js" },
+    "./presets": { "types": "./dist/presets.d.ts", "default": "./dist/presets.js" },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

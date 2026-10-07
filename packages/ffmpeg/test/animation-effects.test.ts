@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { EditorStore, addClip, addMediaAsset, addEffect, setKeyframe, updateClip } from '@freemier/engine';
+import { EditorStore, addClip, addMediaAsset, addEffect, setKeyframe, updateClip, importEffectPreset, applyEffectPreset } from '@freemier/engine';
 import { applyColorEffect, EASINGS, evaluateAnimatable, type TransformProperty } from '@freemier/shared';
 import { exportProject, buildExportArgs } from '../src/export.js';
 import { probeMedia } from '../src/media.js';
@@ -19,7 +19,7 @@ beforeAll(async () => {
   await ff(['-f', 'lavfi', '-i', 'testsrc2=s=96x64:r=10:d=4', '-c:v', 'libx264', '-crf', '0', detail]);
   await ff(['-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=4', tone]);
 });
-afterAll(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+afterAll(async () => { expect(path.resolve(dir).startsWith(path.resolve('.tmp') + path.sep)).toBe(true); await fs.rm(dir, { recursive: true, force: true }); });
 async function setup(source = solid, start = 0) {
   const store = EditorStore.create({ width: W, height: H, fps: 10 }), asset = addMediaAsset(store, await probeMedia(source));
   const track = store.project.timeline.tracks.find((t) => t.kind === (source === tone ? 'audio' : 'video'))!;
@@ -42,6 +42,15 @@ function redBounds(pixels: Buffer) {
 function edgeEnergy(pixels: Buffer) { let energy = 0; for (let y = 0; y < H; y++) for (let x = 1; x < W; x++) for (let c = 0; c < 3; c++) energy += Math.abs(pixels[(y * W + x) * 3 + c]! - pixels[(y * W + x - 1) * 3 + c]!); return energy; }
 
 describe('decoded animation', () => {
+  it('renders imported ordered preset settings into decoded pixels and restores output after undo', async () => {
+    const { store, clip } = await setup();
+    const baseline = rgb(await frame(await render(store)));
+    const preset = importEffectPreset(store, JSON.stringify({ format: 'freemier-effect-preset', version: 1, name: 'Measured sepia', description: 'Sepia followed by contrast/brightness', author: 'Independent fixture', tags: [], media: 'video', effects: [{ type: 'sepia', enabled: true, params: { amount: .7 } }, { type: 'color_adjust', enabled: true, params: { contrast: 1.1, brightness: .02 } }] }));
+    applyEffectPreset(store, preset.id, clip.id, 'replace'); const changed = rgb(await frame(await render(store)));
+    const expected = applyColorEffect(applyColorEffect(baseline, 'sepia', { amount: .7 }), 'color_adjust', { contrast: 1.1, brightness: .02 });
+    for (let c = 0; c < 3; c++) expect(Math.abs(changed[c]! - expected[c]!)).toBeLessThanOrEqual(4);
+    expect(changed).not.toEqual(baseline); store.undo(); expect(rgb(await frame(await render(store)))).toEqual(baseline);
+  }, 120000);
   it.each(EASINGS)('renders %s at clip-local time despite nonzero source/timeline offsets', async (easing) => {
     const { store, clip } = await setup(box, 2);
     setKeyframe(store, clip.id, 'x', 0, -.2, easing); setKeyframe(store, clip.id, 'x', 1, .2);
