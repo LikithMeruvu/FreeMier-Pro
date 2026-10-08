@@ -112,11 +112,14 @@ export function registerPanelsTimelineTimeline(ui) {
         ui.ctx.fillRect(x + 1, y + 4, w - 2, 16);
         if (track.kind === 'audio') {
           if (asset?.hasAudio && !ui.waveforms.has(asset.id)) {
-            ui.waveforms.set(asset.id, []);
+            const pending = [];
+            ui.waveforms.set(asset.id, pending);
             fetch(ui.BRIDGE + '/waveform', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }) }).then((r) => r.json()).then((result) => {
-              if (result.ok)
-                ui.waveforms.set(asset.id, result.peaks); ui.renderTimeline();
-            }).catch(() => { });
+              const current = ui.project?.media.find((item) => item.id === asset.id);
+              if (ui.waveforms.get(asset.id) !== pending || current?.path !== asset.path || current?.copied !== asset.copied) return;
+              if (result.ok) { ui.waveforms.set(asset.id, result.peaks); ui.renderTimeline(); }
+              else ui.waveforms.delete(asset.id);
+            }).catch(() => { if (ui.waveforms.get(asset.id) === pending) ui.waveforms.delete(asset.id); });
           }
           const peaks = ui.waveforms.get(asset?.id) ?? [];
           ui.ctx.strokeStyle = '#99c8b5';

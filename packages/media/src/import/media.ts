@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Id, MediaAsset } from '@freemier/shared';
 import { EditorError, newMediaId } from '@freemier/shared';
 import { runFfprobe } from '../providers/ffmpeg/run.js';
+import { hashMediaSource } from '../identity/source.js';
 
 interface ProbeStream {
   index?: number;
@@ -129,10 +130,13 @@ export async function probeMedia(filePath: string, opts: ProbeOptions = {}): Pro
 export interface ImportOptions extends ProbeOptions {
   /** Directory to copy the media into. When omitted the file is referenced in place. */
   copyTo?: string;
+  /** Transaction owner records its exclusive file for cleanup if registration fails. */
+  onCopyCreated?: (file: string, identity: { dev: number; ino: number }) => void;
 }
 
 export async function importMedia(filePath: string, opts: ImportOptions = {}): Promise<MediaAsset> {
   if (opts.copyTo) {
+    const sourceIdentity = await hashMediaSource(filePath);
     await fs.mkdir(opts.copyTo, { recursive: true });
     const id = opts.id ?? newMediaId();
     const filename = `${id}${path.extname(filePath)}`;
@@ -140,8 +144,32 @@ export async function importMedia(filePath: string, opts: ImportOptions = {}): P
     // Files from different directories can have the same name. Each import owns
     // its copy, so it cannot silently bind to a previously imported file.
     await fs.copyFile(filePath, destination, constants.COPYFILE_EXCL);
-    const asset = await probeMedia(destination, { ...opts, id, recordPath: filename });
-    return { ...asset, name: path.basename(filePath), path: filename, copied: true };
+    const createdStat = await fs.lstat(destination);
+    try {
+      opts.onCopyCreated?.(destination, { dev: createdStat.dev, ino: createdStat.ino });
+      const [copiedIdentity, sourceAfterCopy] = await Promise.all([hashMediaSource(destination), hashMediaSource(filePath)]);
+      if (copiedIdentity.sha256 !== sourceIdentity.sha256 || copiedIdentity.size !== sourceIdentity.size ||
+          sourceAfterCopy.sha256 !== sourceIdentity.sha256 || sourceAfterCopy.size !== sourceIdentity.size)
+        throw new EditorError('CONFLICT', 'Media source changed while it was being imported', { path: filePath, destination });
+      const asset = await probeMedia(destination, { ...opts, id, recordPath: filename });
+      const destinationAfterProbe = await hashMediaSource(destination);
+      if (destinationAfterProbe.sha256 !== copiedIdentity.sha256 || destinationAfterProbe.size !== copiedIdentity.size)
+        throw new EditorError('CONFLICT', 'Imported media changed while it was being probed', { path: destination });
+      return { ...asset, name: path.basename(filePath), path: filename, copied: true, sourceIdentity: copiedIdentity };
+    } catch (error) {
+      // The destination was created with COPYFILE_EXCL. Remove it on failure
+      // only while it still has the same filesystem identity as that copy.
+      try {
+        const current = await fs.lstat(destination);
+        if (current.isFile() && current.ino === createdStat.ino && current.dev === createdStat.dev) await fs.unlink(destination);
+      } catch { /* Leave uncertain or externally replaced files untouched. */ }
+      throw error;
+    }
   }
-  return probeMedia(filePath, opts);
+  const sourceIdentity = await hashMediaSource(filePath);
+  const asset = await probeMedia(filePath, opts);
+  const sourceAfterProbe = await hashMediaSource(filePath);
+  if (sourceIdentity.sha256 !== sourceAfterProbe.sha256 || sourceIdentity.size !== sourceAfterProbe.size)
+    throw new EditorError('CONFLICT', 'Media source changed while it was being imported', { path: filePath });
+  return { ...asset, sourceIdentity };
 }

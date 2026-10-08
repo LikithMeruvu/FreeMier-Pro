@@ -1,9 +1,11 @@
 import {
-  addMediaAsset
+  addMediaAsset, listMediaBins
 } from '@freemier/engine';
 import { extractThumbnail, extractWaveform, importMedia, probeMedia } from '@freemier/media';
 import { EditorError } from '@freemier/shared';
 import { z } from 'zod';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { CommandDefinition } from './context.js';
 import { ok, resolveMediaPath } from './helpers.js';
 
@@ -32,12 +34,41 @@ export const MEDIA_COMMANDS: CommandDefinition[] = [
     inputSchema: {
       path: z.string().describe('Absolute path to the media file'),
       copyIntoProject: z.boolean().optional().describe('Copy the file into the project instead of referencing it'),
+      binId: z.string().nullable().optional().describe('Import into this project bin atomically; null/omit means root'),
     },
     handler: async (a, ctx) => {
-      const asset = await importMedia(a.path as string, {
-        copyTo: a.copyIntoProject ? `${ctx.workspace}/media` : undefined,
+      const binId = a.binId as string | null | undefined;
+      if (binId && !listMediaBins(ctx.store).some((bin) => bin.id === binId)) throw new EditorError('NOT_FOUND', 'Media bin not found', { binId });
+      let changed = false;
+      const unsubscribe = ctx.store.subscribe(() => { changed = true; });
+      let asset;
+      let committed = false;
+      let copyTo: string | undefined;
+      let staged: { file: string; dev: number; ino: number } | undefined;
+      try { asset = await importMedia(a.path as string, {
+        copyTo: a.copyIntoProject ? await (async () => {
+          const workspace = await fs.realpath(ctx.workspace);
+          await fs.mkdir(path.join(workspace, 'media'), { recursive: true });
+          copyTo = await fs.realpath(path.join(workspace, 'media'));
+          if (!copyTo.startsWith(workspace + path.sep)) throw new EditorError('IO_ERROR', 'Project media directory is outside the owning workspace');
+          return copyTo;
+        })() : undefined,
+        onCopyCreated: (file, identity) => { staged = { file, ...identity }; },
       });
-      addMediaAsset(ctx.store, asset);
+      if (changed) throw new EditorError('CONFLICT', 'Project changed while importing media; refresh and try again');
+      addMediaAsset(ctx.store, asset, binId);
+      committed = true;
+      } finally {
+        unsubscribe();
+        // importMedia uses an exclusive fresh filename. Remove only this
+        // uncommitted copy if an intervening edit prevented its registration.
+        if (!committed && staged && copyTo && staged.file.startsWith(copyTo + path.sep)) {
+          try {
+            const current = await fs.lstat(staged.file);
+            if (await fs.realpath(path.dirname(staged.file)) === copyTo && current.isFile() && current.dev === staged.dev && current.ino === staged.ino) await fs.unlink(staged.file);
+          } catch { /* Keep uncertain or externally replaced paths untouched. */ }
+        }
+      }
       ctx.notify({ kind: 'media', ids: [asset.id] });
       return ok({ asset });
     },

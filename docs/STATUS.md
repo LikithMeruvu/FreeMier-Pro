@@ -7,7 +7,7 @@ Updated 8 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 | Area | Working support |
 |---|---|
 | Project | Visible New Project/settings; name/dimensions edits with undo; frame-rate changes on an empty authored timeline; load/save copied-media directories; project validation; schema-1/legacy `.palmier` |
-| Media | Local file probing/import, thumbnails and audio waveforms; compatibility depends on installed FFmpeg/ffprobe |
+| Media | Local file probing/import, thumbnails and waveforms; nested bins, metadata, search/filter/sort/paging, identity/file checks and explicit relink; compatibility depends on installed FFmpeg/ffprobe |
 | Timeline | Aligned video/audio pair placement, link/unlink and atomic timing edits; independent clips; add/move/split/trim/delete/duplicate; slip/roll; visible track rename/reorder/remove, mute/lock; zoom/fit/snapping |
 | Monitors | Source in/out ranges and insertion; Program preview; decoded paused frame seeking |
 | Animation | Position, scale, rotation and opacity keyframes; hold, linear and eased interpolation |
@@ -16,14 +16,14 @@ Updated 8 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 | Titles | Static styled multiline titles using bundled Noto Sans Regular |
 | Captions | One editable plain SRT track; import/export, timing and style; burn-in, no captions or SRT sidecar |
 | Presets | Descriptive portable `.fmfx.json` effect stacks; inspect, import, search, apply, capture, export and remove |
-| MCP and GUI | 72 standard MCP tools; desktop controls and agents share one owning project store; changes appear live |
+| MCP and GUI | 82 standard MCP tools; desktop controls and agents share one owning project store; changes appear live |
 | Output | CPU FFmpeg export, including H.264/HEVC when the required encoder is installed |
 
 ## Checks
 
-The suite includes **255 tests in 18 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite and **10 linked-media Electron checks**. These all passed on Windows on 8 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
+The suite includes **315 tests in 23 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite, **10 linked-media Electron checks** and a media organisation desktop workflow. These all passed on Windows on 8 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
 
-The prior six-package reorganisation passed its 217 tests and baseline desktop checks on Windows and Linux. This milestone adds five commands and preserves the previous tool names/input schemas. The new aligned-pair and project/track checks have Windows acceptance; exact-commit Linux results remain separate. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md) and [27-area tracker](FEATURE-COMPLETION.md).
+The preceding linked-media/project-control milestone passed Windows checks and [Linux CI](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37807515970). Media organisation adds ten commands and one optional `binId` field to `media_import`; existing names and other original inputs remain compatible. This new milestone has Windows acceptance; its exact-commit Linux result remains separate. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md) and [27-area tracker](FEATURE-COMPLETION.md).
 
 Current automated results are available in [GitHub Actions](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workflows/verify.yml). Repeatable desktop startup and supported-platform verification remain part of release reliability work. Counts describe the available checks, not a guarantee that every run or editing workload succeeds.
 
@@ -36,7 +36,8 @@ Current automated results are available in [GitHub Actions](https://github.com/L
 - Titles use one bundled font with an initial Latin/Greek/Cyrillic scope. Arbitrary fonts, rich text and animated text are planned.
 - Captions support one track and up to 256 non-overlapping plain-text cues. WebVTT/ASS, word-level editing and automatic transcription are planned.
 - Presets support the seven built-in effects. LUTs, vendor presets, animated templates, transition masks and executable OFX/VST3/LV2 plugins require additional support.
-- Transitions, nested sequences, bins, proxies, multicam, interchange, advanced grading/mixing, local AI and GPU rendering remain planned.
+- Project media organisation supports ordinary bins and explicit hash-verified relink. Legacy files without identity require compatible media facts and explicit consent. Saved search bins, XMP writes, external indexes and cancellable scans remain unavailable. See [media organisation](MEDIA-ORGANISATION.md).
+- Transitions, nested sequences, proxies, multicam, interchange, advanced grading/mixing, local AI and GPU rendering remain planned.
 - GUI workspace/source/transport selection is currently local presentation state. Additional MCP presentation controls and exact composited image output are planned.
 - Installation packages, recovery/autosave, export overwrite/cancel protection, desktop session hardening and sustained real-footage/performance trials remain open.
 

@@ -60,7 +60,7 @@ packages/gui/
     components/controls.js Reusable buttons, inputs, labels and messages
     styles/app.css        Colours, sizes, spacing and appearance
     panels/
-      project/          Media list and import controls
+      project/          Bins, metadata, search, paging, file checks, relink and import controls
       source-monitor/   Source playback and source in/out points
       program-monitor/  Edited video preview and sound playback
       timeline/         Tracks, clips, mouse edits and snapping
@@ -99,7 +99,7 @@ packages/engine/src/
     settings.ts     Changes project name/dimensions; safely checks frame-rate changes
     validation.ts   Checks project data before accepting it
   history/snapshots.ts Keeps bounded undo and redo snapshots
-  library/assets.ts   Adds imported media descriptions to the project
+  library/assets.ts   Imports asset records; manages bins, metadata, queries and location changes
   timeline/
     tracks.ts       Adds/removes/reorders tracks without reversing unrelated layers
     operations.ts   Changes track settings
@@ -136,6 +136,8 @@ Put feature checks in `packages/engine/test/<feature>/`. `test/integration/` che
 
 `test/linked-media/` covers paired edits, rollback, locks, ripple propagation and saved links. `test/project/settings.test.ts` covers project settings and track ordering. Electron checks in `gui/test/acceptance/linked-media.mjs` and `project-tracks.mjs` exercise the actual visible controls. Linked editing currently supports one aligned video/audio pair, not offset or multiple-audio groups.
 
+`test/library/organisation.test.ts` checks bins, metadata, searches, undo, validation and old project compatibility. `gui/test/acceptance/media-organisation.mjs` operates the visible library controls and verifies relink, save/reopen and decoded media.
+
 ## Media: pictures, sound and export
 
 The old `ffmpeg` package is now **media** because it does more than export. FFmpeg is one provider inside it.
@@ -148,6 +150,7 @@ packages/media/src/
   rendering/effects.ts     Converts effects/keyframes into render instructions
   rendering/text.ts        Makes title/caption images from the bundled font
   export/export.ts         Builds output settings and renders the timeline
+  identity/source.ts       Streaming file identity, availability and bounded candidate discovery
   providers/ffmpeg/run.ts   Starts FFmpeg/ffprobe using argument arrays
   preview/                 Reserved: native preview frames and caching
   proxies/                 Reserved: smaller editing copies of large media
@@ -159,7 +162,7 @@ packages/media/src/
   index.ts                 Shares working media functions
 ```
 
-Media works on files; it does not own the editing project. Tests in `test/integration/`, `test/effects/` and `test/text/` check actual metadata, decoded output, sound and text rendering.
+Media works on files; it does not own the editing project. Tests in `test/identity/`, `test/integration/`, `test/effects/` and `test/text/` check actual metadata, decoded output, sound and text rendering.
 
 ## Service: the common editing session
 
@@ -172,6 +175,7 @@ packages/service/src/
     project.ts             Project create/info/settings/save/load and track reorder requests
     history.ts             Undo and redo requests
     media.ts               Probe/import/thumbnail/waveform requests
+    media-library.ts       Bin, metadata, query, availability and relink requests
     tracks.ts              Track requests
     timeline.ts            Timeline queries
     clips.ts               Basic clip editing requests
@@ -189,6 +193,7 @@ packages/service/src/
   connection/bridge.ts     Live updates, GUI commands and media routes
   persistence/projects.ts  Packages copied media on save and opens projects
   jobs/export.ts           Coordinates native exports and progress
+  library/relink.ts        Verify replacement files and switch one asset location atomically
   library/import/presets.ts Reads bounded portable effect-preset files
   library/catalog/         Reserved: searchable descriptions of user resources
   library/storage/         Reserved: personal resource storage and references
@@ -200,7 +205,7 @@ packages/service/src/
 
 Commands keep their name, description and input fields here. GUI and MCP use the same handlers. Editing rules belong in engine; native file processing belongs in media. Service joins them. Export progress works today; a full queue and cancellation remain planned.
 
-`test/session/` checks that MCP and GUI requests use the exact same store and workspace. `test/connection/` checks live updates, media routes and failures.
+`test/session/` checks that MCP and GUI requests use the exact same store and workspace. `test/connection/` checks live updates, media routes and failures. `test/library/` checks native relink, retained copies, concurrent-edit refusals and cache recovery.
 
 ## MCP: the AI connection
 
@@ -217,13 +222,13 @@ packages/mcp/src/
   index.ts             Keeps public imports working
 ```
 
-Agents still start `packages/mcp/dist/cli.js`. There are 72 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen.
+Agents still start `packages/mcp/dist/cli.js`. There are 82 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen.
 
 ## Shared: common definitions
 
 ```text
 packages/shared/src/
-  project/types.ts          Project, timeline, clip, track and media fields
+  project/types.ts          Project, timeline, clip, track, media identity and optional library fields
   project/ids.ts            Unique IDs for project items
   calculations/timecode.ts  Frame/time calculations
   calculations/animation.ts Animation curves, limits and easing
@@ -246,6 +251,7 @@ Program code and a user's imported files are different things. Importing a prese
 | Kind | Location and purpose |
 |---|---|
 | Built-in resources | `assets/`: shipped resources and licences. Today: `fonts/` with Noto Sans, `OFL.txt` and its checksum guide. |
+| Project bins and metadata | Optional `mediaLibrary` inside the owning project, saved in `project.json`; media files stay separate. |
 | Current project presets | `effectPresets` inside the owning project; saved in that project's `project.json`. This works today. |
 | Portable preset file | A `.fmfx.json` file at the user's chosen import/export location. Import reads it into the project. |
 | Copied media | Saved `.freemier/media/` directory; move it with `project.json`. Referenced files keep external paths. |

@@ -25,10 +25,43 @@ export function registerConnectionClient(ui) {
       ui.eventEpoch = history.eventEpoch;
       ui.eventSequence = history.eventSequence;
     }
-    const replace = ui.project?.id !== next.id;
+    const previous = ui.project;
+    const replace = previous?.id !== next.id;
+    const changedMedia = new Set((previous?.media ?? []).filter((asset) => {
+      const current = next.media.find((item) => item.id === asset.id);
+      return !current || current.path !== asset.path || current.copied !== asset.copied;
+    }).map((asset) => asset.id));
+    for (const id of changedMedia) {
+      ui.thumbs.delete(id);
+      ui.thumbs.delete('image:' + id);
+      ui.pendingThumbs.delete(id);
+      ui.waveforms.delete(id);
+    }
+    for (const [id, entry] of ui.decoders) {
+      const clip = previous?.timeline.tracks.flatMap((track) => track.clips).find((item) => item.id === id);
+      if (replace || (clip && changedMedia.has(clip.assetId))) {
+        ui.discard(entry);
+        ui.decoders.delete(id);
+      }
+    }
     if (replace)
       ui.titleRasters.clear();
     ui.project = next;
+    // Asset ids and bridge URLs stay stable after relink. Reload the actual
+    // decoder instead of continuing to display bytes from its old location.
+    if (!replace && changedMedia.has(ui.sourceAssetId) && ui.sourceEl) {
+      const asset = next.media.find((item) => item.id === ui.sourceAssetId);
+      ui.sourceEl.pause?.();
+      if (asset) {
+        ui.sourceEl.src = ui.mediaUrl(asset);
+        ui.sourceEl.load?.();
+      } else {
+        ui.sourceEl.remove();
+        ui.sourceEl = null;
+        ui.sourceAssetId = null;
+        ui.sourcePlaying = false;
+      }
+    }
     ui.revision = nextRevision ?? ui.revision;
     const rasterPayloads = new Set([...(next.timeline.titles ?? []).map((t) => textRasterPayload(t.text, t.style, next.timeline.width, next.timeline.height)), ...(next.timeline.captions?.cues ?? []).map((c) => textRasterPayload(c.text, next.timeline.captions.style, next.timeline.width, next.timeline.height))]);
     for (const key of ui.titleRasters.keys())

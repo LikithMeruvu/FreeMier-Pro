@@ -7,7 +7,7 @@ FreeMier Pro is an independent video editor for Windows and Linux. Each editing 
 | Foundation | Headless engine, media, persistence, undo/redo, live GUI, H.264/HEVC export | Working baseline |
 | Professional editing | Source/program monitors, usable timeline tools, slip/roll/duplicate, track locks, effect/animation rendering | Verified Windows and Linux milestone |
 | Compositing and text | Markers, transitions, titles, captions/subtitles, masks, nested compositions | Markers, titles and SRT captions verified on Windows/Linux; transitions/masks/nests pending |
-| Media workflows | Bins, sequences, linked AV, proxies/relinking, multicam, interchange | Aligned linked AV verified on Windows; remaining workflows planned |
+| Media workflows | Bins, sequences, linked AV, proxies/relinking, multicam, interchange | Aligned linked AV verified on Windows/Linux; bins, metadata, media query and verified relink verified on Windows; sequences/proxies/multicam/interchange planned |
 | Editing and harness completion | Ripple/slide/overwrite, atomic batches, speed/reverse, source/program presentation and rendered-frame tools | Planned |
 | Color and audio | Scopes, richer grading, LUTs, automation, mixing, loudness | Planned |
 | Local AI | Transcription/tracking/background removal with optional provider keys | Planned |
@@ -18,6 +18,6 @@ A feature is complete when its editing rules, MCP commands, desktop controls and
 
 Public testing and production release gates are tracked in [release readiness](docs/RELEASE-READINESS.md); packaging and reliability are separate from advanced feature coverage.
 
-The [27-area tracker](docs/FEATURE-COMPLETION.md) keeps fixed feature counts and separate development/acceptance status. Current linked edits and visible project/track controls have bounded Windows acceptance; this does not finish the wider professional editor roadmap.
+The [27-area tracker](docs/FEATURE-COMPLETION.md) keeps fixed feature counts and separate development/acceptance status. Current linked edits and visible project/track controls have Windows/Linux acceptance; ordinary project media organisation has Windows acceptance; this does not finish the wider professional editor roadmap.
 
 Import support is added format by format. `import_capabilities` lists the current handlers and limits. Imported resources should have descriptions, editable settings and clear compatibility information. See the [working preset format](docs/PRESETS.md). File recognition alone does not establish usable preview or export.

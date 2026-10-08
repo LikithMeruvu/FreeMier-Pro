@@ -7,20 +7,20 @@ This tracker follows the same 27 product areas throughout development. Developme
 - **Development:** Not started, In development, or Implemented. Implemented means the scoped behavior exists; it does not mean it has passed final acceptance.
 - **Acceptance:** Not accepted or Accepted. An area is accepted only when its relevant engine and shared service behavior, standard MCP calls, actual GUI behavior, and real media preview/export or project persistence checks pass. Platform, hardware, and installation checks also apply where listed in the remaining-work criterion.
 - **Done** means development is Implemented and acceptance is Accepted. Do not infer acceptance from legacy checks or from a narrower existing capability.
-- The acceptance evidence section is available for recording reviewable results, especially while rows 2 and 23 are in development.
+- Record reviewable checks in the acceptance evidence section before marking an area accepted.
 
 ## Current summary — 8 October 2026
 
 | Measure | Count |
 | --- | ---: |
-| Done | 2 / 27 |
-| Incomplete | 25 / 27 |
+| Done | 3 / 27 |
+| Incomplete | 24 / 27 |
 | In development | 0 |
-| Not started | 25 |
+| Not started | 24 |
 | Implemented, waiting for acceptance | 0 |
-| Without final acceptance | 25 |
+| Without final acceptance | 24 |
 
-The current suite passes 255 tests in 18 files, the 40 baseline Electron checks, the standalone font check, the project/track suite and 10 linked-media Electron checks on Windows. Existing regression checks do not establish acceptance for the other 25 areas.
+The current suite passes 315 tests in 23 files, the 40 baseline Electron checks, the standalone font check, the project/track suite, 10 linked-media checks and the media organisation Electron workflow on Windows. The preceding linked-media/project-control milestone also passed Linux CI. Existing regression checks do not establish acceptance for the other 24 areas.
 
 ## Fixed area tracker
 
@@ -40,7 +40,7 @@ The current suite passes 255 tests in 18 files, the 40 baseline Electron checks,
 | 12 | Personal library | Not started | Not accepted | Build a reusable asset library with metadata, organization, project reuse, persistence, GUI access, and MCP operations. |
 | 13 | Broader imports | Not started | Not accepted | Support named import groups: vendor presets, LUTs, animated templates, graphics, transition assets, and project interchange. Publish an explicit supported-format matrix and verify representative supported files import, edit, save, preview, and export. Do not imply support for every vendor format. |
 | 14 | Native plugins | Not started | Not accepted | Define and implement a usable native plugin interface, loading and failure handling, GUI/MCP availability, and platform compatibility checks. |
-| 15 | Media organisation | Not started | Not accepted | Organize, search, sort, filter, relink, and inspect project media with changes reflected in the shared project and GUI. |
+| 15 | Media organisation | Implemented | Accepted | Ordinary nested bins, metadata, search/filter/sort/paging, file availability and explicit verified relink pass shared engine/service, standard MCP, GUI, undo/save/reopen and decoded output checks on Windows. Saved search bins, XMP writes, proxies and external indexes remain unsupported extensions. |
 | 16 | Native preview | Not started | Not accepted | Provide responsive decoded video and audio playback, seeking and synchronization in the desktop GUI, verified on supported platforms. |
 | 17 | GPU processing | Not started | Not accepted | Accelerate supported processing on compatible hardware, detect capability, fall back to CPU, and verify output correctness and runtime behavior on GPU and CPU. |
 | 18 | More editing tools | Not started | Not accepted | Deliver the planned additional editing operations through engine, MCP, and GUI, with undo/persistence and real output checks for each supported operation. |
@@ -62,3 +62,4 @@ Record concise evidence here when an area reaches final acceptance: date, platfo
 | ---: | --- |
 | 2 | Windows, 8 October: 32 [engine cases](../packages/engine/test/linked-media/linked-media.test.ts); [standard SDK stdio tests](../packages/mcp/test/stdio/linked-media.test.ts) fully decode exported frames/samples, check source-window timing/silent gaps/level and reopen copied media; [actual Electron suite](../packages/gui/test/acceptance/linked-media.mjs) passes 10 checks covering source/drop placement, linked selection, all paired timing controls, chooser/cancel, locks, undo, decoded audible preview, save/open and export. |
 | 23 | Windows, 8 October: four [engine cases](../packages/engine/test/project/settings.test.ts), including equal-order locked-layer preservation; standard MCP settings/reorder and decoded output-dimension checks; [actual Electron suite](../packages/gui/test/acceptance/project-tracks.mjs) verifies creation/settings, preserved content, fps refusal, undo, save/reopen, visible reorder/rename/remove, locks and authored-track restoration. Only native confirmation/prompt replies are substituted in this headless test. |
+| 15 | Windows, 8 October: 38 [engine cases](../packages/engine/test/library/organisation.test.ts); [file identity checks](../packages/media/test/identity/source.test.ts) and [failed-import checks](../packages/media/test/identity/import-failure.test.ts); 11 [native service cases](../packages/service/test/library/relink.test.ts) cover refusals, concurrent edits/undo, retained copies, external replacements and cache recovery; three [standard SDK MCP cases](../packages/mcp/test/stdio/media-organisation.test.ts) check discovery, bins/query/history, multiple exact candidates and fully decoded linked picture/sound after relink and portable reopen; [actual Electron workflow](../packages/gui/test/acceptance/media-organisation.mjs) operates bins/import/filter/sort/metadata/save/open/offline/relink, checks delayed thumbnails across edits, and decodes source/export. Exact-commit Linux acceptance is tracked separately. |

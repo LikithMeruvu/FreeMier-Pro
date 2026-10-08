@@ -76,7 +76,54 @@ export function validateProject(value: unknown, source = '<memory>'): Project {
     if (asset.sampleRate !== null) number(asset.sampleRate, `${f}.sampleRate`, 1, Number.MAX_SAFE_INTEGER, true);
     for (const key of ['videoCodec', 'audioCodec'] as const) if (asset[key] !== null) string(asset[key], `${f}.${key}`, true);
     number(asset.probedAt, `${f}.probedAt`, 0, Number.MAX_SAFE_INTEGER, true);
+    if (asset.sourceIdentity !== undefined) {
+      const identity = object(asset.sourceIdentity, `${f}.sourceIdentity`);
+      if (!/^[a-f0-9]{64}$/.test(string(identity.sha256, `${f}.sourceIdentity.sha256`))) fail(`${f}.sourceIdentity.sha256`, 'must be 64 lowercase hexadecimal characters');
+      number(identity.size, `${f}.sourceIdentity.size`, 0, Number.MAX_SAFE_INTEGER, true);
+    }
     media.set(assetId, raw as MediaAsset);
+  }
+
+  if (p.mediaLibrary !== undefined) {
+    const library = object(p.mediaLibrary, 'mediaLibrary');
+    if (library.version !== 1) fail('mediaLibrary.version', 'must be 1');
+    const bins = array(library.bins, 'mediaLibrary.bins');
+    if (bins.length > 256) fail('mediaLibrary.bins', 'maximum 256 bins');
+    const parents = new Map<string, string | null>(), siblings = new Map<string | null, Set<string>>();
+    for (const [i, raw] of bins.entries()) {
+      const f = `mediaLibrary.bins[${i}]`, bin = object(raw, f), binId = id(bin.id, `${f}.id`);
+      if (parents.has(binId)) fail(`${f}.id`, 'duplicate ID');
+      const name = string(bin.name, `${f}.name`, true);
+      if (name.length > 120 || /[\x00-\x1f\x7f]/.test(name)) fail(`${f}.name`, 'must be a bin name of at most 120 characters without control characters');
+      const parentId = bin.parentId === null ? null : id(bin.parentId, `${f}.parentId`);
+      parents.set(binId, parentId);
+      const names = siblings.get(parentId) ?? new Set<string>(), normalized = name.trim().toLowerCase();
+      if (names.has(normalized)) fail(`${f}.name`, 'duplicate sibling name');
+      names.add(normalized); siblings.set(parentId, names);
+    }
+    for (const [i, raw] of bins.entries()) {
+      const bin = raw as { id: string; parentId: string | null }, visited = new Set<string>();
+      let current: string | null = bin.id;
+      while (current !== null) {
+        if (visited.has(current)) fail(`mediaLibrary.bins[${i}].parentId`, 'bin cycle');
+        if (!parents.has(current)) fail(`mediaLibrary.bins[${i}].parentId`, 'missing parent bin');
+        visited.add(current);
+        if (visited.size > 32) fail(`mediaLibrary.bins[${i}].parentId`, 'maximum bin depth 32');
+        current = parents.get(current)!;
+      }
+    }
+    const entries = new Set<string>();
+    for (const [i, raw] of array(library.entries, 'mediaLibrary.entries').entries()) {
+      const f = `mediaLibrary.entries[${i}]`, entry = object(raw, f), assetId = id(entry.assetId, `${f}.assetId`);
+      unique(assetId, entries, `${f}.assetId`);
+      if (!media.has(assetId)) fail(`${f}.assetId`, 'missing media asset');
+      if (entry.binId !== null && !parents.has(id(entry.binId, `${f}.binId`))) fail(`${f}.binId`, 'missing bin');
+      if (string(entry.description, `${f}.description`).length > 4096) fail(`${f}.description`, 'maximum 4096 characters');
+      const tags = array(entry.tags, `${f}.tags`);
+      if (tags.length > 32) fail(`${f}.tags`, 'maximum 32 tags');
+      for (const [j, tag] of tags.entries()) if (string(tag, `${f}.tags[${j}]`, true).length > 64) fail(`${f}.tags[${j}]`, 'maximum 64 characters');
+      number(entry.rating, `${f}.rating`, 0, 5, true);
+    }
   }
 
   const trackIds = new Set<string>(), clipIds = new Set<string>();

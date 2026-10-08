@@ -46,6 +46,7 @@ export class LiveBridge {
   #unsubscribe: (() => void) | null = null;
   #thumbnails = new Map<string, Promise<string>>();
   #waveforms = new Map<string, Promise<number[]>>();
+  #mediaLocations = new Map<string, string>();
   // Delivery ordering is separate from snapshot revisions restored by undo.
   #eventSequence = 0;
   readonly #eventEpoch = randomUUID();
@@ -54,6 +55,7 @@ export class LiveBridge {
     this.#store = opts.store;
     this.#workspace = opts.workspace;
     this.#port = opts.port ?? 4317;
+    for (const asset of opts.store.project.media) this.#mediaLocations.set(asset.id, `${asset.copied}:${asset.path}`);
   }
 
   get port(): number {
@@ -71,6 +73,11 @@ export class LiveBridge {
 
     // Push every store change to all connected renderers.
     this.#unsubscribe = this.#store.subscribe((event) => {
+      const locations = new Map(event.state.project.media.map((asset) => [asset.id, `${asset.copied}:${asset.path}`]));
+      for (const [id, location] of this.#mediaLocations) if (locations.get(id) !== location) {
+        this.#thumbnails.delete(id); this.#waveforms.delete(id);
+      }
+      this.#mediaLocations = locations;
       this.#eventSequence++;
       this.#broadcast({
         type: 'change',
@@ -181,14 +188,24 @@ export class LiveBridge {
       if (!asset) throw new EditorError('NOT_FOUND', 'Media asset not found');
       const source = resolveMediaPath(asset.id, { store: this.#store, workspace: this.#workspace, notify: () => {} });
       if (waveform) {
-        if (!this.#waveforms.has(asset.id)) this.#waveforms.set(asset.id, asset.hasAudio ? extractWaveform(source, 600) : Promise.resolve([]));
+        if (!this.#waveforms.has(asset.id)) {
+          const pending = asset.hasAudio ? extractWaveform(source, 600) : Promise.resolve([]);
+          this.#waveforms.set(asset.id, pending);
+          void pending.catch(() => { if (this.#waveforms.get(asset.id) === pending) this.#waveforms.delete(asset.id); });
+        }
         this.#json(res, 200, { ok: true, peaks: await this.#waveforms.get(asset.id) });
       } else {
-        if (!this.#thumbnails.has(asset.id)) this.#thumbnails.set(asset.id, (async () => {
-          const out = path.join(this.#workspace, 'cache', `thumb-${asset.id}.jpg`);
-          await extractThumbnail(source, out, .5, 160, asset.duration);
-          return `data:image/jpeg;base64,${(await fs.readFile(out)).toString('base64')}`;
-        })());
+        if (!this.#thumbnails.has(asset.id)) {
+          const pending = (async () => {
+          const out = path.join(this.#workspace, 'cache', `thumb-${asset.id}-${randomUUID()}.jpg`);
+          try {
+            await extractThumbnail(source, out, .5, 160, asset.duration);
+            return `data:image/jpeg;base64,${(await fs.readFile(out)).toString('base64')}`;
+          } finally { await fs.unlink(out).catch(() => {}); }
+          })();
+          this.#thumbnails.set(asset.id, pending);
+          void pending.catch(() => { if (this.#thumbnails.get(asset.id) === pending) this.#thumbnails.delete(asset.id); });
+        }
         this.#json(res, 200, { ok: true, dataUrl: await this.#thumbnails.get(asset.id) });
       }
     } catch (err) {

@@ -11,6 +11,36 @@
 /** Opaque identifier. Never assume format; always treat as a string. */
 export type Id = string;
 
+/** Persisted expected bytes, independent of transient file availability. */
+export interface MediaSourceIdentity {
+  readonly sha256: string;
+  readonly size: number;
+}
+
+export type SourceIdentity = MediaSourceIdentity;
+
+/** Ordinary project bin; null denotes the implicit library root. */
+export interface MediaBin {
+  readonly id: Id;
+  readonly name: string;
+  readonly parentId: Id | null;
+}
+
+/** Project-only metadata; importing or editing it never changes source files. */
+export interface MediaLibraryEntry {
+  readonly assetId: Id;
+  readonly binId: Id | null;
+  readonly description: string;
+  readonly tags: readonly string[];
+  readonly rating: number;
+}
+
+export interface MediaLibrary {
+  readonly version: 1;
+  readonly bins: readonly MediaBin[];
+  readonly entries: readonly MediaLibraryEntry[];
+}
+
 /** A media file that has been imported into a project. */
 export interface MediaAsset {
   readonly id: Id;
@@ -31,6 +61,7 @@ export interface MediaAsset {
   readonly audioCodec: string | null;
   /** Probe result capture time (epoch ms) — informational only. */
   readonly probedAt: number;
+  readonly sourceIdentity?: MediaSourceIdentity;
 }
 
 /** A keyframe on an animatable numeric property. */
@@ -185,6 +216,8 @@ export interface Project {
   readonly version: number;
   readonly timeline: Timeline;
   readonly media: readonly MediaAsset[];
+  /** Optional in schema 1. Absence means root membership and default metadata. */
+  readonly mediaLibrary?: MediaLibrary;
   /** Portable normalized effect presets, optional in schema-1 projects. */
   readonly effectPresets?: readonly import('../resources/presets.js').ImportedEffectPreset[];
   /** Created at epoch ms. */
