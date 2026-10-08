@@ -1,6 +1,6 @@
 # Current support
 
-Updated 7 October 2026. FreeMier Pro is a **developer source preview**, not a production-ready desktop editor.
+Updated 8 October 2026. FreeMier Pro is a **developer source preview**, not a production-ready desktop editor.
 
 ## Available features
 
@@ -21,7 +21,9 @@ Updated 7 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 
 ## Checks
 
-The suite includes **214 tests in 14 files**, **40 live Electron checks** and **one standalone font check**. Full acceptance has passed on Windows and Linux. Tests use generated media, decoded video pixels/audio, a real standard MCP connection, desktop controls, saved projects and actual video exports.
+The suite includes **217 tests in 15 files**, **40 live Electron checks** and **one standalone font check**. Full acceptance has passed on Windows and Linux. Tests use generated media, decoded video pixels/audio, a real standard MCP connection, desktop controls, saved projects and actual video exports.
+
+The feature-folder reorganisation passed the build, all 217 tests, 40 Electron checks and the standalone font check on Windows on 8 October. The six-package layout keeps editing sessions in the shared service and preserves the 67 MCP tool contracts. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md).
 
 Current automated results are available in [GitHub Actions](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workflows/verify.yml). A subsequent Linux run reported a graphics/CDP timeout during desktop startup; repeatable desktop startup remains part of release reliability work. Counts describe the available checks, not a guarantee that every run or editing workload succeeds.
 

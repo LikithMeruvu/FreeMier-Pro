@@ -1,0 +1,68 @@
+import { timelineDuration } from '@freemier/engine';
+import { z } from 'zod';
+import type { CommandDefinition } from './context.js';
+import { ok } from './helpers.js';
+import { loadOwnedProject, saveOwnedProject } from '../persistence/projects.js';
+
+export const PROJECT_COMMANDS: CommandDefinition[] = [
+  {
+    name: 'project_info',
+    title: 'Project info',
+    description:
+      'Get the current project: name, id, resolution, fps, duration, media count, and track count. Start here to learn what is loaded.',
+    inputSchema: {},
+    handler: async (_a, ctx) => {
+      const p = ctx.store.project;
+      return ok({
+        id: p.id,
+        name: p.name,
+        fps: p.timeline.fps,
+        width: p.timeline.width,
+        height: p.timeline.height,
+        duration: timelineDuration(p.timeline),
+        mediaCount: p.media.length,
+        trackCount: p.timeline.tracks.length,
+        revision: ctx.store.revision,
+        canUndo: ctx.store.canUndo,
+        canRedo: ctx.store.canRedo,
+      });
+    },
+  },
+  {
+    name: 'project_create',
+    title: 'Create project',
+    description: 'Replace the current project with a new empty one. Discards the current timeline.',
+    inputSchema: {
+      name: z.string().optional().describe('Project name'),
+      fps: z.number().positive().optional().describe('Frame rate, default 30'),
+      width: z.number().int().positive().optional().describe('Output width, default 1920'),
+      height: z.number().int().positive().optional().describe('Output height, default 1080'),
+    },
+    handler: async (a, ctx) => {
+      const { EditorStore: Store, createEmptyProject } = await import('@freemier/engine');
+      const project = createEmptyProject({
+        name: a.name as string | undefined,
+        fps: a.fps as number | undefined,
+        width: a.width as number | undefined,
+        height: a.height as number | undefined,
+      });
+      ctx.store.load(project);
+      ctx.notify({ kind: 'project', ids: [project.id] });
+      return ok({ id: project.id, name: project.name });
+    },
+  },
+  {
+    name: 'project_save',
+    title: 'Save project',
+    description: 'Save the current project and copied media to disk. Defaults to <workspace>/project.freemier. Legacy .palmier paths are supported.',
+    inputSchema: { path: z.string().optional().describe('Destination project directory') },
+    handler: saveOwnedProject,
+  },
+  {
+    name: 'project_load',
+    title: 'Load project',
+    description: 'Load a .freemier or legacy .palmier project into the owning store.',
+    inputSchema: { path: z.string().describe('Path to the project directory') },
+    handler: loadOwnedProject,
+  }
+];

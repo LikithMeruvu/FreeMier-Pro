@@ -1,0 +1,24 @@
+import { ADVANCED_CLIPS_COMMANDS } from './advanced-clips.js';
+import { CAPABILITIES_COMMANDS } from './capabilities.js';
+import { CAPTION_TOOLS } from './captions.js';
+import { CLIPS_COMMANDS } from './clips.js';
+import type { CommandDefinition } from './context.js';
+import { EFFECTS_COMMANDS } from './effects.js';
+import { EXPORT_COMMANDS } from './export.js';
+import { HISTORY_COMMANDS } from './history.js';
+import { KEYFRAMES_COMMANDS } from './keyframes.js';
+import { MARKER_TOOLS } from './markers.js';
+import { MEDIA_COMMANDS } from './media.js';
+import { PRESET_TOOLS } from './presets.js';
+import { PROJECT_COMMANDS } from './project.js';
+import { TIMELINE_COMMANDS } from './timeline.js';
+import { TITLE_TOOLS } from './titles.js';
+import { TRACKS_COMMANDS } from './tracks.js';
+
+const grouped = [...ADVANCED_CLIPS_COMMANDS, ...KEYFRAMES_COMMANDS, ...EFFECTS_COMMANDS, ...CAPABILITIES_COMMANDS, ...MEDIA_COMMANDS, ...TIMELINE_COMMANDS, ...TRACKS_COMMANDS, ...PROJECT_COMMANDS, ...HISTORY_COMMANDS, ...CLIPS_COMMANDS, ...EXPORT_COMMANDS];
+const byName = new Map(grouped.map(command => [command.name, command]));
+const advancedNames = ["clip_slip", "clip_roll", "clip_duplicate", "keyframe_set", "keyframe_remove", "keyframe_list", "effect_add", "effect_update", "effect_remove", "effect_list", "effect_catalog", "editor_capabilities"];
+const baseNames = ["media_probe", "media_inspect", "timeline_at_time", "timeline_gaps", "track_inspect", "project_info", "project_create", "project_save", "project_load", "undo", "redo", "media_import", "media_list", "media_thumbnail", "media_waveform", "timeline_inspect", "timeline_duration", "track_add", "track_remove", "track_update", "clip_add", "clip_remove", "clip_move", "clip_split", "clip_trim", "clip_set_transform", "clip_set_audio", "clip_inspect", "export_video", "export_preview"];
+export const COMMANDS: CommandDefinition[] = [...advancedNames.map(name => byName.get(name)!), ...MARKER_TOOLS, ...TITLE_TOOLS, ...CAPTION_TOOLS, ...PRESET_TOOLS, ...baseNames.map(name => byName.get(name)!)];
+export type { CommandContext, CommandDefinition } from './context.js';
+export { resolveMediaPath } from './helpers.js';

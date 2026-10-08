@@ -2,9 +2,9 @@
 
 An independent, open-source video editor that an MCP agent and a person can operate together. The Electron interface and standard MCP server edit one project store, so agent changes appear live in the timeline and preview.
 
-The workspace has Source and Program monitors, a multitrack timeline, effect controls and dedicated Color and Audio panels. The implementation is MIT-licensed. See the [development roadmap](ROADMAP.md) and [simple code guide](docs/CODE-GUIDE.md).
+The workspace has Source and Program monitors, a multitrack timeline, effect controls and dedicated Color and Audio panels. The implementation is MIT-licensed. See the [development roadmap](ROADMAP.md) and [folder structure](FOLDER-STRUCTURE.md) and [simple code guide](docs/CODE-GUIDE.md).
 
-The development build exposes **67 MCP tools**. Its checks include **214 tests and 40 live Electron checks plus one standalone font check**. It supports slip/roll/duplicate, track locks, transform keyframes/easing, seven rendered effects, independent Source ranges, markers, styled titles, editable SRT captions, portable copied-media save/load and descriptive effect-preset imports. Project validation protects load/save/history/export boundaries. See [supported features and limitations](docs/STATUS.md).
+The development build exposes **67 MCP tools**. Its checks include **217 tests and 40 live Electron checks plus one standalone font check**. It supports slip/roll/duplicate, track locks, transform keyframes/easing, seven rendered effects, independent Source ranges, markers, styled titles, editable SRT captions, portable copied-media save/load and descriptive effect-preset imports. Project validation protects load/save/history/export boundaries. See [supported features and limitations](docs/STATUS.md).
 
 This is a developer source preview. Production readiness, installation and real-footage acceptance gates are tracked in [release readiness](docs/RELEASE-READINESS.md).
 
@@ -14,7 +14,7 @@ The Presets library imports portable `.fmfx.json` stacks with descriptions, cont
 
 ## Run locally
 
-Install Node.js 24, npm, and FFmpeg/ffprobe on PATH. FFmpeg must include the encoders you want to export with, such as libx264 or libx265, and `drawtext`/FreeType for titles. Noto Sans Regular is bundled with its [OFL license and checksum](packages/ffmpeg/fonts/README.md); no system-font substitution or runtime font download occurs.
+Install Node.js 24, npm, and FFmpeg/ffprobe on PATH. FFmpeg must include the encoders you want to export with, such as libx264 or libx265, and `drawtext`/FreeType for titles. Noto Sans Regular is bundled with its [OFL license and checksum](assets/fonts/README.md); no system-font substitution or runtime font download occurs.
 
 ```sh
 npm ci
@@ -73,6 +73,7 @@ The bridge listens on loopback. Match the bridge port to the project; use separa
 
 ```sh
 npm run fixtures
+npm run check:structure
 npm run build
 npm test
 npm run test:gui

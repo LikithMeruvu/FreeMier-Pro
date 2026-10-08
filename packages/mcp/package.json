@@ -14,9 +14,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@freemier/engine": "*",
-    "@freemier/ffmpeg": "*",
     "@freemier/shared": "*",
     "zod": "^3.24.1",
-    "zod-to-json-schema": "^3.25.2"
+    "zod-to-json-schema": "^3.25.2",
+    "@freemier/media": "*",
+    "@freemier/service": "*"
   }
 }

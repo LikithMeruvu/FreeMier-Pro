@@ -1,0 +1,15 @@
+import { addTitle, listTitles, removeTitle, updateTitle, type TitleInput, type TitlePatch } from '@freemier/engine';
+import { fontList } from '@freemier/media';
+import { z } from 'zod';
+import type { CommandDefinition } from './context.js';
+
+const rgb = z.string().regex(/^#[0-9a-f]{6}$/i), unit = z.number().finite().min(0).max(1);
+const style = z.object({ fontId: z.literal('noto-sans').optional(), fontSize: z.number().finite().int().min(8).max(512).optional(), color: rgb.optional(), outlineColor: rgb.optional(), outlineWidth: z.number().finite().int().min(0).max(20).optional(), backgroundColor: rgb.optional(), backgroundOpacity: unit.optional(), opacity: unit.optional(), padding: z.number().finite().int().min(0).max(32).optional(), x: unit.optional(), y: unit.optional(), align: z.enum(['left', 'center', 'right']).optional(), verticalAlign: z.enum(['top', 'middle', 'bottom']).optional(), lineSpacing: z.number().finite().int().min(0).max(64).optional() }).strict();
+const fields = { text: z.string().min(1).max(4096), start: z.number().finite().min(0).max(86400), end: z.number().finite().min(0).max(86400), style: style.optional() };
+export const TITLE_TOOLS: CommandDefinition[] = [
+  { name: 'font_list', title: 'List verified bundled fonts', description: 'Inspect font identity, checksum, license and supported script scope. Checks the actual bundled font; no implicit download or system-font substitution.', inputSchema: {}, handler: async () => ({ ok: true, fonts: await fontList() }) },
+  { name: 'title_add', title: 'Add styled title', description: 'Add an independent topmost title with frame-quantized sequence [start,end), plain multiline text and typed style. Extends sequence content duration; glyph PNGs are shared by preview/export.', inputSchema: fields, handler: async (a, c) => ({ ok: true, title: addTitle(c.store, a as TitleInput) }) },
+  { name: 'title_update', title: 'Edit styled title', description: 'Update title text, timing or partial style in one undoable change. Invalid changes do not alter state.', inputSchema: { titleId: z.string(), text: fields.text.optional(), start: fields.start.optional(), end: fields.end.optional(), style: fields.style }, handler: async (a, c) => ({ ok: true, title: updateTitle(c.store, a.titleId as string, a as TitlePatch) }) },
+  { name: 'title_remove', title: 'Remove styled title', description: 'Remove a title by stable ID from the authoritative sequence.', inputSchema: { titleId: z.string() }, handler: async (a, c) => { removeTitle(c.store, a.titleId as string); return { ok: true, removed: a.titleId }; } },
+  { name: 'title_list', title: 'Inspect titles', description: 'List topmost overlays in composition order, with sequence seconds and output-pixel styling.', inputSchema: {}, handler: async (_a, c) => ({ ok: true, titles: listTitles(c.store), order: 'creation order, above video tracks', timeDomain: 'sequence seconds', interval: '[start,end)', affectsRenderDuration: true }) },
+];

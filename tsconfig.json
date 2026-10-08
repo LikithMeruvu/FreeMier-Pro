@@ -8,7 +8,10 @@
       "path": "packages/engine"
     },
     {
-      "path": "packages/ffmpeg"
+      "path": "packages/media"
+    },
+    {
+      "path": "packages/service"
     },
     {
       "path": "packages/mcp"

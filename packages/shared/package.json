@@ -5,13 +5,34 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    "./animation": { "types": "./dist/animation.d.ts", "default": "./dist/animation.js" },
-    "./effects": { "types": "./dist/effects.d.ts", "default": "./dist/effects.js" },
-    "./timecode": { "types": "./dist/timecode.d.ts", "default": "./dist/timecode.js" },
-    "./text": { "types": "./dist/text.d.ts", "default": "./dist/text.js" },
-    "./srt": { "types": "./dist/srt.d.ts", "default": "./dist/srt.js" },
-    "./captions": { "types": "./dist/captions.d.ts", "default": "./dist/captions.js" },
-    "./presets": { "types": "./dist/presets.d.ts", "default": "./dist/presets.js" },
+    "./animation": {
+      "types": "./dist/calculations/animation.d.ts",
+      "default": "./dist/calculations/animation.js"
+    },
+    "./effects": {
+      "types": "./dist/calculations/effects.d.ts",
+      "default": "./dist/calculations/effects.js"
+    },
+    "./timecode": {
+      "types": "./dist/calculations/timecode.d.ts",
+      "default": "./dist/calculations/timecode.js"
+    },
+    "./text": {
+      "types": "./dist/titles/style.d.ts",
+      "default": "./dist/titles/style.js"
+    },
+    "./srt": {
+      "types": "./dist/captions/srt.d.ts",
+      "default": "./dist/captions/srt.js"
+    },
+    "./captions": {
+      "types": "./dist/captions/model.d.ts",
+      "default": "./dist/captions/model.js"
+    },
+    "./presets": {
+      "types": "./dist/resources/presets.d.ts",
+      "default": "./dist/resources/presets.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
