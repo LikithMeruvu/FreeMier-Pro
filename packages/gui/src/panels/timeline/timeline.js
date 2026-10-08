@@ -11,7 +11,11 @@ export function registerPanelsTimelineTimeline(ui) {
       mute.dataset.trackMute = track.id;
       const lock = ui.button(track.locked ? '◆' : '◇', 'Lock / unlock ' + track.name, () => ui.command('track_update', { trackId: track.id, locked: !track.locked }), track.locked ? 'active' : '');
       lock.dataset.trackLock = track.id;
-      row.append(name, mute, lock, ui.node('span', 'track-kind', track.kind.toUpperCase() + (track.locked ? ' · LOCKED' : '')));
+      const rename = ui.button('✎', 'Rename ' + track.name, () => { const next = window.prompt('Track name', track.name); if (next !== null && next.trim()) void ui.command('track_update', { trackId: track.id, name: next.trim() }); }, 'track-action');
+      const up = ui.button('↑', 'Move ' + track.name + ' up', () => ui.command('track_reorder', { trackId: track.id, direction: 'up' }), 'track-action');
+      const down = ui.button('↓', 'Move ' + track.name + ' down', () => ui.command('track_reorder', { trackId: track.id, direction: 'down' }), 'track-action');
+      const remove = ui.button('×', 'Remove ' + track.name, () => { if (window.confirm('Remove track “' + track.name + '” and all clips on it?')) void ui.command('track_remove', { trackId: track.id }); }, 'track-action');
+      row.append(name, mute, lock, rename, up, down, remove, ui.node('span', 'track-kind', track.kind.toUpperCase() + (track.locked ? ' · LOCKED' : '')));
       ui.$('track-headers').append(row);
     }
     const tail = ui.node('div');
@@ -29,6 +33,12 @@ export function registerPanelsTimelineTimeline(ui) {
     if (!ui.project)
       return;
     const scroll = ui.$('timeline-scroll'), dpr = devicePixelRatio || 1, ordered = ui.tracks();
+    const links = ui.project.timeline.clipLinks ?? [];
+    const selectedLink = links.find((link) => link.videoClipId === ui.selectedClipId || link.audioClipId === ui.selectedClipId);
+    const selectedIds = new Set(selectedLink ? [selectedLink.videoClipId, selectedLink.audioClipId] : [ui.selectedClipId]);
+    ui.$('btn-link-toggle').textContent = selectedLink ? 'Unlink video + audio' : 'Link video + audio';
+    ui.$('btn-link-toggle').disabled = !ui.find();
+    ui.canvas.dataset.selectedLinkedClips = selectedLink ? '2' : '0';
     const width = Math.max(scroll.clientWidth, Math.max(10, ui.viewEnd() + 2) * ui.pps), height = Math.max(ordered.length * ui.TRACK_H + ui.RULER_H + 24, scroll.clientHeight);
     ui.$('timeline-area').style.width = width + 'px';
     ui.$('timeline-area').style.height = height + 'px';
@@ -92,7 +102,7 @@ export function registerPanelsTimelineTimeline(ui) {
       ui.ctx.fillStyle = track.kind === 'audio' ? '#1d2525' : '#1e222a';
       ui.ctx.fillRect(0, y, width, ui.TRACK_H - 1);
       for (const clip of track.clips) {
-        const x = clip.start * ui.pps, w = Math.max(2, clip.duration * ui.pps), h = ui.TRACK_H - 10, asset = ui.assetFor(clip), selected = clip.id === ui.selectedClipId;
+        const x = clip.start * ui.pps, w = Math.max(2, clip.duration * ui.pps), h = ui.TRACK_H - 10, asset = ui.assetFor(clip), selected = selectedIds.has(clip.id);
         if (x + w < offsetX || x > offsetX + visibleWidth)
           continue;
         ui.ctx.globalAlpha = track.muted ? .4 : 1;
@@ -143,7 +153,8 @@ export function registerPanelsTimelineTimeline(ui) {
         ui.ctx.beginPath();
         ui.ctx.rect(x + 4, y + 4, Math.max(0, w - 8), 15);
         ui.ctx.clip();
-        ui.ctx.fillText(clip.label ?? asset?.name ?? 'Clip', x + 6, y + 12);
+        const linked = links.some((link) => link.videoClipId === clip.id || link.audioClipId === clip.id);
+        ui.ctx.fillText((linked ? '↔ ' : '') + (clip.label ?? asset?.name ?? 'Clip'), x + 6, y + 12);
         ui.ctx.restore();
         if (clip.effects.some((e) => e.enabled)) {
           ui.ctx.fillStyle = '#c7b1eb';
@@ -175,7 +186,9 @@ export function registerPanelsTimelineTimeline(ui) {
     let result = ui.q(Math.max(0, time));
     if (!ui.snap)
       return result;
-    const targets = [0, ui.playhead, ...ui.project.timeline.tracks.flatMap((track) => track.clips.filter((clip) => clip.id !== ignore).flatMap((clip) => [clip.start, clip.start + clip.duration]))];
+    const pair = (ui.project.timeline.clipLinks ?? []).find((link) => link.videoClipId === ignore || link.audioClipId === ignore);
+    const ignoredIds = new Set(pair ? [pair.videoClipId, pair.audioClipId] : [ignore]);
+    const targets = [0, ui.playhead, ...ui.project.timeline.tracks.flatMap((track) => track.clips.filter((clip) => !ignoredIds.has(clip.id)).flatMap((clip) => [clip.start, clip.start + clip.duration]))];
     const near = targets.sort((a, b) => Math.abs(a - result) - Math.abs(b - result))[0];
     if (Math.abs(near - result) * ui.pps < 8)
       result = ui.q(near);

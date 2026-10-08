@@ -6,5 +6,9 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 60000,
     hookTimeout: 60000,
+    // Native render tests start FFmpeg processes; run files sequentially so
+    // low-core machines do not launch many encoder worker pools at once.
+    fileParallelism: false,
+    maxWorkers: 2,
   },
 });

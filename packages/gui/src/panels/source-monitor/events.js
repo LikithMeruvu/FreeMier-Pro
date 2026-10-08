@@ -33,6 +33,7 @@ export function bindSourceMonitorEvents(ui) {
     }
   });
   ui.$('source-place').addEventListener('click', ui.placeSource);
+  ui.$('btn-link-toggle').addEventListener('click', ui.toggleClipLink);
   ui.$('source-track').addEventListener('change', () => { ui.targetTrackId = ui.$('source-track').value; ui.renderTrackHeaders(); });
   document.addEventListener('keydown', (event) => {
     if (event.target.closest?.('input,textarea,select,[contenteditable=true]'))

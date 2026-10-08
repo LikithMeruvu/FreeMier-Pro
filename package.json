@@ -18,7 +18,7 @@
     "typecheck": "tsc -b --pretty",
     "mcp": "node packages/mcp/dist/cli.js",
     "gui": "npm run start -w @freemier/gui",
-    "test:gui": "node packages/gui/test/acceptance/live-sync.mjs && node packages/gui/test/acceptance/standalone-text.mjs",
+    "test:gui": "node packages/gui/test/acceptance/live-sync.mjs && node packages/gui/test/acceptance/standalone-text.mjs && node packages/gui/test/acceptance/project-tracks.mjs && node packages/gui/test/acceptance/linked-media.mjs",
     "screenshot": "node packages/gui/test/acceptance/screenshot.mjs",
     "fixtures": "node scripts/generate-fixtures.mjs",
     "media:inspect": "node packages/mcp/dist/media-cli.js media inspect",

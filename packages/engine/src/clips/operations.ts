@@ -1,6 +1,7 @@
 import type { Clip, MediaAsset, Project, Timeline, Track } from '@freemier/shared';
 import { defaultTransform, EditorError, evaluateAnimatable, invalidArgument, newClipId, notFound, validateTransformValue } from '@freemier/shared';
 import { withClips, withTrack, type EditorStore } from '../project/store.js';
+import { assertLinkedDestination, assertPairEditable, linkedPairFor, linkedTransaction } from '../linked-media/operations.js';
 import {
   clipAt,
   clipEnd,
@@ -44,6 +45,9 @@ export function addClip(
   store: EditorStore,
   opts: AddClipOptions & { strict?: boolean },
 ): Clip {
+  if (opts.ripple && store.project.timeline.clipLinks?.length) {
+    return linkedTransaction(store, [opts.trackId], (stage) => addClip(stage, opts));
+  }
   const project = store.project;
   const track = requireTrack(project, opts.trackId);
   if (track.locked) throw new EditorError('CONFLICT', `Track is locked: ${track.name}`, { trackId: track.id });
@@ -112,6 +116,19 @@ function trackEnd(track: Track): number {
 }
 
 export function removeClip(store: EditorStore, clipId: string, ripple = false): boolean {
+  const pair = linkedPairFor(store.project.timeline, clipId);
+  if (pair) {
+    assertPairEditable(store, pair);
+    return linkedTransaction(store, [pair.videoClipId, pair.audioClipId], (stage, links) => {
+      removeClip(stage, pair.videoClipId, ripple); removeClip(stage, pair.audioClipId, ripple);
+      links.splice(links.findIndex((link) => link.id === pair.id), 1);
+      return true;
+    });
+  }
+  if (ripple && store.project.timeline.clipLinks?.length) {
+    if (!findClip(store.project.timeline, clipId)) return false;
+    return linkedTransaction(store, [clipId], (stage) => removeClip(stage, clipId, ripple));
+  }
   const project = store.project;
   for (const track of project.timeline.tracks) {
     const target = track.clips.find((c) => c.id === clipId);
@@ -140,6 +157,19 @@ export function moveClip(
   newTrackId?: string,
   ripple = false,
 ): Clip {
+  const pair = linkedPairFor(store.project.timeline, clipId);
+  if (pair) {
+    assertPairEditable(store, pair);
+    assertLinkedDestination(store, pair, clipId, newTrackId);
+    return linkedTransaction(store, [pair.videoClipId, pair.audioClipId], (stage) => {
+      const own = moveClip(stage, clipId, newStart, newTrackId, ripple);
+      moveClip(stage, clipId === pair.videoClipId ? pair.audioClipId : pair.videoClipId, newStart, undefined, ripple);
+      return own;
+    });
+  }
+  if (ripple && store.project.timeline.clipLinks?.length) {
+    return linkedTransaction(store, [clipId], (stage) => moveClip(stage, clipId, newStart, newTrackId, ripple));
+  }
   const project = store.project;
   const fps = project.timeline.fps;
   const found = findClip(project.timeline, clipId);
@@ -190,6 +220,15 @@ export function moveClip(
 }
 
 export function splitClip(store: EditorStore, clipId: string, at: number): [Clip, Clip] {
+  const pair = linkedPairFor(store.project.timeline, clipId);
+  if (pair) {
+    assertPairEditable(store, pair);
+    return linkedTransaction(store, [pair.videoClipId, pair.audioClipId], (stage, links) => {
+      const video = splitClip(stage, pair.videoClipId, at), audio = splitClip(stage, pair.audioClipId, at);
+      links.push({ id: `lnk_${newClipId()}`, videoClipId: video[1].id, audioClipId: audio[1].id });
+      return clipId === pair.videoClipId ? video : audio;
+    });
+  }
   const project = store.project;
   const fps = project.timeline.fps;
   const found = findClip(project.timeline, clipId);
@@ -234,6 +273,15 @@ export function trimClip(
   edge: 'in' | 'out',
   newTime: number,
 ): Clip {
+  const pair = linkedPairFor(store.project.timeline, clipId);
+  if (pair) {
+    assertPairEditable(store, pair);
+    return linkedTransaction(store, [pair.videoClipId, pair.audioClipId], (stage) => {
+      const own = trimClip(stage, clipId, edge, newTime);
+      trimClip(stage, clipId === pair.videoClipId ? pair.audioClipId : pair.videoClipId, edge, newTime);
+      return own;
+    });
+  }
   const project = store.project;
   const fps = project.timeline.fps;
   const found = findClip(project.timeline, clipId);

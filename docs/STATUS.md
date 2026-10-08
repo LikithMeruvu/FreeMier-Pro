@@ -6,9 +6,9 @@ Updated 8 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 
 | Area | Working support |
 |---|---|
-| Project | Create, load and save; copied-media project directories; undo/redo; project input validation; schema-1 and legacy `.palmier` directories |
+| Project | Visible New Project/settings; name/dimensions edits with undo; frame-rate changes on an empty authored timeline; load/save copied-media directories; project validation; schema-1/legacy `.palmier` |
 | Media | Local file probing/import, thumbnails and audio waveforms; compatibility depends on installed FFmpeg/ffprobe |
-| Timeline | Separate video/audio tracks; add/move/split/trim/delete/duplicate clips; slip and rolling trim; track mute/lock; zoom, fit and snapping |
+| Timeline | Aligned video/audio pair placement, link/unlink and atomic timing edits; independent clips; add/move/split/trim/delete/duplicate; slip/roll; visible track rename/reorder/remove, mute/lock; zoom/fit/snapping |
 | Monitors | Source in/out ranges and insertion; Program preview; decoded paused frame seeking |
 | Animation | Position, scale, rotation and opacity keyframes; hold, linear and eased interpolation |
 | Effects | Color adjustment, grayscale, sepia, blur, sharpen, video fade and audio fade; ordered stacks and bypass |
@@ -16,20 +16,21 @@ Updated 8 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 | Titles | Static styled multiline titles using bundled Noto Sans Regular |
 | Captions | One editable plain SRT track; import/export, timing and style; burn-in, no captions or SRT sidecar |
 | Presets | Descriptive portable `.fmfx.json` effect stacks; inspect, import, search, apply, capture, export and remove |
-| MCP and GUI | 67 standard MCP tools; desktop controls and agents share one owning project store; changes appear live |
+| MCP and GUI | 72 standard MCP tools; desktop controls and agents share one owning project store; changes appear live |
 | Output | CPU FFmpeg export, including H.264/HEVC when the required encoder is installed |
 
 ## Checks
 
-The suite includes **217 tests in 15 files**, **40 live Electron checks** and **one standalone font check**. Full acceptance has passed on Windows and Linux. Tests use generated media, decoded video pixels/audio, a real standard MCP connection, desktop controls, saved projects and actual video exports.
+The suite includes **255 tests in 18 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite and **10 linked-media Electron checks**. These all passed on Windows on 8 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
 
-The feature-folder reorganisation passed the build, all 217 tests, 40 Electron checks and the standalone font check on Windows on 8 October. The six-package layout keeps editing sessions in the shared service and preserves the 67 MCP tool contracts. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md).
+The prior six-package reorganisation passed its 217 tests and baseline desktop checks on Windows and Linux. This milestone adds five commands and preserves the previous tool names/input schemas. The new aligned-pair and project/track checks have Windows acceptance; exact-commit Linux results remain separate. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md) and [27-area tracker](FEATURE-COMPLETION.md).
 
-Current automated results are available in [GitHub Actions](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workflows/verify.yml). A subsequent Linux run reported a graphics/CDP timeout during desktop startup; repeatable desktop startup remains part of release reliability work. Counts describe the available checks, not a guarantee that every run or editing workload succeeds.
+Current automated results are available in [GitHub Actions](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workflows/verify.yml). Repeatable desktop startup and supported-platform verification remain part of release reliability work. Counts describe the available checks, not a guarantee that every run or editing workload succeeds.
 
 ## Current limits
 
-- Video and audio tracks are separate. Place an audio-bearing asset on an audio track to include its sound; linked audio/video is planned.
+- Linked editing supports one aligned video/audio pair from the same audio-bearing video. Offset/multiple-audio groups and non-mirrored ripple propagation are unavailable. Existing `clip_add` stays independent. See [linked editing](LINKED-MEDIA.md).
+- Frame-rate changes with authored timing are refused until timeline conversion is implemented. Dimension acceptance does not guarantee every codec supports the requested size.
 - Blur/sharpen and browser scaling/color conversion can differ from exported pixels. These spatial previews are approximations.
 - Splitting or changing the head of a clip with affected keyframes or enabled fades is refused until animation rebasing is implemented. Slip/move/duplicate retain clip-local animation.
 - Titles use one bundled font with an initial Latin/Greek/Cyrillic scope. Arbitrary fonts, rich text and animated text are planned.

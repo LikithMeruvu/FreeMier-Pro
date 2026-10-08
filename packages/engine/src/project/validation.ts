@@ -136,6 +136,25 @@ export function validateProject(value: unknown, source = '<memory>'): Project {
     const ordered = [...clips as Clip[]].sort((a, b) => a.start - b.start);
     for (let j = 1; j < ordered.length; j++) if (ordered[j]!.start < ordered[j - 1]!.start + ordered[j - 1]!.duration - 1e-6) fail(`${f}.clips`, 'clips overlap on this track');
   }
+  if (timeline.clipLinks !== undefined) {
+    const links = new Set<string>(), members = new Set<string>();
+    const tracks = timeline.tracks as unknown as import('@freemier/shared').Track[];
+    for (const [i, raw] of array(timeline.clipLinks, 'timeline.clipLinks').entries()) {
+      const f = `timeline.clipLinks[${i}]`, link = object(raw, f);
+      unique(id(link.id, `${f}.id`), links, `${f}.id`);
+      const videoId = id(link.videoClipId, `${f}.videoClipId`), audioId = id(link.audioClipId, `${f}.audioClipId`);
+      unique(videoId, members, `${f}.videoClipId`); unique(audioId, members, `${f}.audioClipId`);
+      const videoTrack = tracks.find((t) => t.clips.some((c) => c.id === videoId));
+      const audioTrack = tracks.find((t) => t.clips.some((c) => c.id === audioId));
+      if (!videoTrack || !audioTrack || videoTrack.kind !== 'video' || audioTrack.kind !== 'audio') fail(f, 'pair requires existing clips on video and audio tracks');
+      const video = videoTrack!.clips.find((c) => c.id === videoId)!, audio = audioTrack!.clips.find((c) => c.id === audioId)!;
+      const asset = media.get(video.assetId)!;
+      if (video.assetId !== audio.assetId || asset.kind !== 'video' || !asset.hasAudio) fail(f, 'pair requires the same audio-bearing video asset');
+      for (const key of ['start', 'duration', 'sourceIn', 'sourceOut'] as const) {
+        if (Math.abs(video[key] - audio[key]) > 1e-6) fail(f, 'pair timing and source windows must match');
+      }
+    }
+  }
   if (timeline.markers !== undefined) extension('timeline.markers', () => validateMarkers(timeline.markers, fps));
   if (timeline.titles !== undefined) extension('timeline.titles', () => validateTitles(timeline.titles, fps));
   if (timeline.captions !== undefined) extension('timeline.captions', () => validateCaptions(timeline.captions));

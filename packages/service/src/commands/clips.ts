@@ -1,6 +1,7 @@
 import {
   addClip,
   findClip,
+  linkedPairFor,
   moveClip,
   removeClip,
   splitClip, trimClip
@@ -147,7 +148,11 @@ export const CLIPS_COMMANDS: CommandDefinition[] = [
       const found = findClip(ctx.store.project.timeline, a.clipId as string);
       if (!found) throw new EditorError('NOT_FOUND', `Clip not found: ${a.clipId}`, { clipId: a.clipId });
       const asset = ctx.store.project.media.find((m) => m.id === found.clip.assetId) ?? null;
-      return ok({ clip: found.clip, trackId: found.track.id, trackName: found.track.name, asset });
+      const link = linkedPairFor(ctx.store.project.timeline, found.clip.id);
+      const partnerId = link ? (link.videoClipId === found.clip.id ? link.audioClipId : link.videoClipId) : null;
+      const partner = partnerId ? findClip(ctx.store.project.timeline, partnerId) : null;
+      return ok({ clip: found.clip, trackId: found.track.id, trackName: found.track.name, asset,
+        link, linkedClip: partner?.clip ?? null, linkedTrackId: partner?.track.id ?? null });
     },
   }
 ];

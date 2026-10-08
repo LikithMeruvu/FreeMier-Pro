@@ -26,7 +26,7 @@ There is no confirmed release date yet. An alpha can advertise a smaller CPU edi
 Use this procedure when evaluating the editor with footage you own.
 
 1. Use copies of self-recorded SDR H.264/AAC constant-rate 1080p/30 video, a WAV and a still. Begin with a 30–60 second edit; include filenames with spaces.
-2. Make Source in/out ranges and three cuts. Exercise trim/slip/roll/duplicate/razor, lock refusal and undo before adding animation/fades. Place sound explicitly on audio tracks while linked AV remains pending.
+2. Make Source in/out ranges and three cuts. Exercise trim/slip/roll/duplicate/razor, lock refusal and undo before adding animation/fades. Use linked picture/sound placement for audio-bearing video; test both members and explicit video/audio-only placement. Stay within the [aligned-pair profile](LINKED-MEDIA.md).
 3. Add markers, titles and supported SRT captions. Alternate GUI and standard MCP commands and confirm one owning project state.
 4. Save copied media, reopen, move the entire project directory and make original media unavailable. Confirm restored preview/export and unchanged source hashes.
 5. Export the supported format, fully decode and probe dimensions/frame rate/duration/audio, then watch and listen end to end. Check synchronization at the beginning, middle and end and duration within one output frame.

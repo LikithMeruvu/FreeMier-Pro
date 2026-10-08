@@ -8,6 +8,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { COMMANDS as TOOLS } from '../commands/registry.js';
 import { exportSession } from '../jobs/export.js';
+import { resolveMediaPath } from '../commands/helpers.js';
 
 /**
  * Live-sync bridge.
@@ -157,7 +158,7 @@ export class LiveBridge {
       const aliases: Record<string, string> = { clip_transform: 'clip_set_transform', clip_audio: 'clip_set_audio' };
       const action = aliases[String(body.action ?? '')] ?? String(body.action ?? '');
       const tool = TOOLS.find((t) => t.name === action);
-      if (!tool || ['project_create', 'export_video'].includes(action)) throw new EditorError('INVALID_ARGUMENT', 'Unknown bridge command', { action });
+      if (!tool || action === 'export_video') throw new EditorError('INVALID_ARGUMENT', 'Unknown bridge command', { action });
       const parsed = z.object(tool.inputSchema).safeParse(body);
       if (!parsed.success) throw new EditorError('INVALID_ARGUMENT', 'Invalid command arguments', { issues: parsed.error.issues });
       const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, notify: () => { } });
@@ -178,7 +179,7 @@ export class LiveBridge {
       const body = await LiveBridge.#readBody(req);
       const asset = this.#store.project.media.find((m) => m.id === body.assetId);
       if (!asset) throw new EditorError('NOT_FOUND', 'Media asset not found');
-      const source = asset.copied ? path.join(this.#workspace, 'media', asset.path) : asset.path;
+      const source = resolveMediaPath(asset.id, { store: this.#store, workspace: this.#workspace, notify: () => {} });
       if (waveform) {
         if (!this.#waveforms.has(asset.id)) this.#waveforms.set(asset.id, asset.hasAudio ? extractWaveform(source, 600) : Promise.resolve([]));
         this.#json(res, 200, { ok: true, peaks: await this.#waveforms.get(asset.id) });

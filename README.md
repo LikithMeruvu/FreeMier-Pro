@@ -4,7 +4,7 @@ An independent, open-source video editor that an MCP agent and a person can oper
 
 The workspace has Source and Program monitors, a multitrack timeline, effect controls and dedicated Color and Audio panels. The implementation is MIT-licensed. See the [development roadmap](ROADMAP.md) and [folder structure](FOLDER-STRUCTURE.md) and [simple code guide](docs/CODE-GUIDE.md).
 
-The development build exposes **67 MCP tools**. Its checks include **217 tests and 40 live Electron checks plus one standalone font check**. It supports slip/roll/duplicate, track locks, transform keyframes/easing, seven rendered effects, independent Source ranges, markers, styled titles, editable SRT captions, portable copied-media save/load and descriptive effect-preset imports. Project validation protects load/save/history/export boundaries. See [supported features and limitations](docs/STATUS.md).
+The development build exposes **72 MCP tools**. Its checks include **255 tests, 40 baseline live Electron checks, a standalone font check and two new desktop acceptance suites**. It supports aligned linked video/audio edits, visible project/settings/track controls, slip/roll/duplicate, track locks, transform keyframes/easing, seven rendered effects, independent Source ranges, markers, styled titles, editable SRT captions, portable copied-media save/load and descriptive effect-preset imports. Project validation protects load/save/history/export boundaries. See [supported features and limitations](docs/STATUS.md) and the [27-area completion tracker](docs/FEATURE-COMPLETION.md).
 
 This is a developer source preview. Production readiness, installation and real-footage acceptance gates are tracked in [release readiness](docs/RELEASE-READINESS.md).
 
@@ -57,7 +57,7 @@ On Linux:
 FREEMIER_WORKSPACE=/path/to/FreeMier-workspace FREEMIER_BRIDGE_PORT=4317 npm run gui
 ```
 
-An agent can create/load a project, import media, inspect the timeline, add tracks/clips, edit, undo, save, and export. Use `tools/list` to discover the current tool schemas. Video and audio tracks are currently separate: place an audio-bearing asset on an audio track to include its sound. `project_save` packages copied imports inside the saved project directory; referenced imports retain their external paths. Move the entire saved directory for a copied-media project.
+An agent can create/load a project, import media, inspect the timeline, add tracks/clips, edit, undo, save, and export. Use `tools/list` to discover the current tool schemas. Use `clip_add_linked` to place picture and sound from one audio-bearing video as an aligned pair. The GUI uses this by default for video sources; independent placement remains explicit. See [linked editing and its limits](docs/LINKED-MEDIA.md). `project_save` packages copied imports inside the saved project directory; referenced imports retain their external paths. Move the entire saved directory for a copied-media project.
 
 For Codex CLI, the equivalent registration command is:
 
@@ -85,4 +85,4 @@ The [GitHub workflow](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workf
 
 ## Scope
 
-FreeMier Pro is under active development. Transitions, LUTs, arbitrary font imports, animated templates, linked audio/video, proxies, multicam, interchange, richer grading/mixing, local AI and GPU rendering remain planned. Native vendor projects and executable effect/audio plugins are not supported. See the [roadmap](ROADMAP.md) and [release requirements](docs/RELEASE-READINESS.md) before choosing it for an editing job.
+FreeMier Pro is under active development. Transitions, LUTs, arbitrary font imports, animated templates, proxies, multicam, interchange, richer grading/mixing, local AI and GPU rendering remain planned. Native vendor projects and executable effect/audio plugins are not supported. See the [roadmap](ROADMAP.md) and [release requirements](docs/RELEASE-READINESS.md) before choosing it for an editing job.

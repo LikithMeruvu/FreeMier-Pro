@@ -44,7 +44,8 @@ export function createViewState() {
   ui.RULER_H = 28;
   ui.fps = () => ui.project?.timeline.fps ?? 30;
   ui.q = (t) => Math.round(t * ui.fps()) / ui.fps();
-  ui.tracks = () => [...(ui.project?.timeline.tracks ?? [])].sort((a, b) => b.order - a.order);
+  ui.tracks = () => (ui.project?.timeline.tracks ?? []).map((track, index) => ({ track, index }))
+    .sort((a, b) => b.track.order - a.track.order || b.index - a.index).map(({ track }) => track);
   ui.duration = () => Math.max(0, ...(ui.project?.timeline.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)) ?? []), ...(ui.project?.timeline.titles ?? []).map((t) => t.end), captionDuration(ui.project?.timeline.captions?.cues ?? [], ui.fps()));
   ui.viewEnd = () => Math.max(ui.duration(), ...(ui.project?.timeline.markers ?? []).map((m) => m.time));
   ui.find = (id = ui.selectedClipId) => {

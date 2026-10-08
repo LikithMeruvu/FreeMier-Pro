@@ -1,0 +1,64 @@
+﻿# Feature completion tracker
+
+This tracker follows the same 27 product areas throughout development. Development state and final acceptance are tracked separately. Existing basic functions do not mean a broader area is complete. Planned folders and reserved ownership do not count as implemented work.
+
+## Status rules
+
+- **Development:** Not started, In development, or Implemented. Implemented means the scoped behavior exists; it does not mean it has passed final acceptance.
+- **Acceptance:** Not accepted or Accepted. An area is accepted only when its relevant engine and shared service behavior, standard MCP calls, actual GUI behavior, and real media preview/export or project persistence checks pass. Platform, hardware, and installation checks also apply where listed in the remaining-work criterion.
+- **Done** means development is Implemented and acceptance is Accepted. Do not infer acceptance from legacy checks or from a narrower existing capability.
+- The acceptance evidence section is available for recording reviewable results, especially while rows 2 and 23 are in development.
+
+## Current summary — 8 October 2026
+
+| Measure | Count |
+| --- | ---: |
+| Done | 2 / 27 |
+| Incomplete | 25 / 27 |
+| In development | 0 |
+| Not started | 25 |
+| Implemented, waiting for acceptance | 0 |
+| Without final acceptance | 25 |
+
+The current suite passes 255 tests in 18 files, the 40 baseline Electron checks, the standalone font check, the project/track suite and 10 linked-media Electron checks on Windows. Existing regression checks do not establish acceptance for the other 25 areas.
+
+## Fixed area tracker
+
+| ID | Area | Development | Acceptance | Remaining work |
+| ---: | --- | --- | --- | --- |
+| 1 | Transitions | Not started | Not accepted | Add editable transitions with timing, handles, engine and MCP operations, GUI controls, and rendered preview/export. |
+| 2 | Linked video/audio | Implemented | Accepted | Aligned one-video/one-audio profile verified: paired placement, link/unlink, atomic timing edits/undo, GUI controls, save/reopen, audible preview and decoded export. Offset/multiple-audio groups and non-mirrored ripple remain unsupported extensions. |
+| 3 | Multiple timelines | Not started | Not accepted | Create, name, switch, edit, save, and reopen multiple timelines in one project through engine, MCP, and GUI. |
+| 4 | Multicam | Not started | Not accepted | Sync and switch among camera angles, preserve edits, and verify the resulting preview and export. |
+| 5 | Speed editing | Not started | Not accepted | Support variable and constant clip speed with correct timing, sound behavior, preview, and export. |
+| 6 | Advanced compositing | Not started | Not accepted | Provide layered compositing controls and verify the rendered result in preview and export. |
+| 7 | Advanced colour | Not started | Not accepted | Provide focused color tools and verify color changes in actual preview and exported media. |
+| 8 | Advanced audio | Not started | Not accepted | Provide track and clip processing, mixing and automation controls with audible preview and rendered audio checks. |
+| 9 | Animated text | Not started | Not accepted | Create and edit timed text animation and verify it in actual preview and export. |
+| 10 | Advanced captions | Not started | Not accepted | Support caption authoring and import/export formats, timing and styling, then verify persisted captions and rendered output. |
+| 11 | AI features | Not started | Not accepted | Deliver and verify the planned AI workflows as a whole: speech transcription, caption generation, media search/understanding, and editing assistance; include local use, optional user-provided API keys, CPU fallback, and GPU support where applicable. A single provider or workflow is insufficient. |
+| 12 | Personal library | Not started | Not accepted | Build a reusable asset library with metadata, organization, project reuse, persistence, GUI access, and MCP operations. |
+| 13 | Broader imports | Not started | Not accepted | Support named import groups: vendor presets, LUTs, animated templates, graphics, transition assets, and project interchange. Publish an explicit supported-format matrix and verify representative supported files import, edit, save, preview, and export. Do not imply support for every vendor format. |
+| 14 | Native plugins | Not started | Not accepted | Define and implement a usable native plugin interface, loading and failure handling, GUI/MCP availability, and platform compatibility checks. |
+| 15 | Media organisation | Not started | Not accepted | Organize, search, sort, filter, relink, and inspect project media with changes reflected in the shared project and GUI. |
+| 16 | Native preview | Not started | Not accepted | Provide responsive decoded video and audio playback, seeking and synchronization in the desktop GUI, verified on supported platforms. |
+| 17 | GPU processing | Not started | Not accepted | Accelerate supported processing on compatible hardware, detect capability, fall back to CPU, and verify output correctness and runtime behavior on GPU and CPU. |
+| 18 | More editing tools | Not started | Not accepted | Deliver the planned additional editing operations through engine, MCP, and GUI, with undo/persistence and real output checks for each supported operation. |
+| 19 | More MCP controls | Not started | Not accepted | Expose the full supported editing and project-control surface through standard MCP tools, with documented inputs/results and client-call verification. |
+| 20 | Background jobs | Not started | Not accepted | Run long media work as observable cancellable jobs with progress, completion/failure reporting, and verified outputs. |
+| 21 | Scopes | Not started | Not accepted | Provide relevant video and audio scopes that update from the actual project signal and remain consistent with preview/export. |
+| 22 | Workspace settings | Not started | Not accepted | Add persistent user workspace preferences and saved layouts/panel arrangements with GUI controls, validation, and verified behavior after restart. |
+| 23 | Missing GUI controls | Implemented | Accepted | Visible New Project/settings and track rename/reorder/remove verified with refusal, undo and persistence. FPS changes on authored timelines are explicitly refused until conversion exists. |
+| 24 | Project protection | Not started | Not accepted | Provide autosave, crash recovery, and unsaved-close protection; verify recovery and project integrity through real save, reopen, crash, and close scenarios. |
+| 25 | Safe export | Not started | Not accepted | Protect existing outputs from accidental overwrite, export through temporary output with safe publication, and handle cancellation or interruption with safe recovery. Verify playable output, failure handling, and source-project integrity. |
+| 26 | Desktop delivery | Not started | Not accepted | Produce and verify installable Windows and Linux releases, including launch, required media/runtime dependencies, and clean-machine installation/update checks. |
+| 27 | Session protection | Not started | Not accepted | Enforce owning workspace/session identity and authentication; validate bridge requests, check privileged IPC senders, restrict navigation, and test refusal of cross-session access. |
+
+## Acceptance evidence
+
+Record concise evidence here when an area reaches final acceptance: date, platform/configuration where relevant, and links or commands/results for engine/service, standard MCP, actual GUI, and real media or persistence checks. Keep evidence specific to the row and its remaining-work criteria.
+
+| ID | Evidence |
+| ---: | --- |
+| 2 | Windows, 8 October: 32 [engine cases](../packages/engine/test/linked-media/linked-media.test.ts); [standard SDK stdio tests](../packages/mcp/test/stdio/linked-media.test.ts) fully decode exported frames/samples, check source-window timing/silent gaps/level and reopen copied media; [actual Electron suite](../packages/gui/test/acceptance/linked-media.mjs) passes 10 checks covering source/drop placement, linked selection, all paired timing controls, chooser/cancel, locks, undo, decoded audible preview, save/open and export. |
+| 23 | Windows, 8 October: four [engine cases](../packages/engine/test/project/settings.test.ts), including equal-order locked-layer preservation; standard MCP settings/reorder and decoded output-dimension checks; [actual Electron suite](../packages/gui/test/acceptance/project-tracks.mjs) verifies creation/settings, preserved content, fps refusal, undo, save/reopen, visible reorder/rename/remove, locks and authored-track restoration. Only native confirmation/prompt replies are substituted in this headless test. |

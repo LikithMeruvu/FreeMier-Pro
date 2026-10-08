@@ -2,6 +2,7 @@ import type { EditorStore } from '@freemier/engine';
 import { timelineDuration } from '@freemier/engine';
 import { EditorError } from '@freemier/shared';
 import type { CommandContext } from './context.js';
+import path from 'node:path';
 
 export const ok = (data: Record<string, unknown>) => ({ ok: true, ...data });
 export function assertExportable(store: EditorStore): void {
@@ -12,7 +13,7 @@ export function assertExportable(store: EditorStore): void {
 export function resolveMediaPath(assetIdOrPath: string, ctx: CommandContext): string {
   const asset = ctx.store.project.media.find((m) => m.id === assetIdOrPath);
   if (asset) {
-    if (asset.copied) return `${ctx.workspace}/media/${asset.path}`;
+    if (asset.copied && !path.isAbsolute(asset.path)) return path.resolve(ctx.workspace, 'media', asset.path);
     return asset.path;
   }
   // Not an asset id — treat it as a path.

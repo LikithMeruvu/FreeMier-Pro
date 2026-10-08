@@ -15,10 +15,14 @@ export function inspectTimeline(store: EditorStore): Record<string, unknown> {
     height: timeline.height,
     duration: timelineDuration(timeline),
     trackCount: timeline.tracks.length,
+    clipLinks: timeline.clipLinks ?? [],
     tracks: timeline.tracks.map((t) => ({
       id: t.id,
       name: t.name,
       kind: t.kind,
+      order: t.order,
+      muted: t.muted,
+      locked: t.locked,
       clipCount: t.clips.length,
       duration: t.clips.reduce((m, c) => Math.max(m, clipEnd(c)), 0),
       clips: sortClips(t.clips).map((c) => ({

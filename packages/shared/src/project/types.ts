@@ -110,6 +110,13 @@ export interface TimelineMarker {
   readonly notes: string;
 }
 
+/** An aligned video/audio pair from one audio-bearing video asset. */
+export interface ClipLink {
+  readonly id: Id;
+  readonly videoClipId: Id;
+  readonly audioClipId: Id;
+}
+
 export interface Timeline {
   readonly id: Id;
   readonly name: string;
@@ -117,6 +124,8 @@ export interface Timeline {
   readonly width: number;
   readonly height: number;
   readonly tracks: readonly Track[];
+  /** Optional in schema 1; each clip belongs to at most one aligned AV pair. */
+  readonly clipLinks?: readonly ClipLink[];
   /** Optional in legacy schema-1 projects. Markers never extend render duration. */
   readonly markers?: readonly TimelineMarker[];
   /** Independent topmost overlays, ordered by creation. Optional in schema 1. */

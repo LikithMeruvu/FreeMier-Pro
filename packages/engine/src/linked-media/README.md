@@ -1,7 +1,7 @@
-# linked-media
+# Linked video and audio
 
-Reserved for planned code: Keep picture and sound linked during cuts, trims, moves and grouped edits.
+`operations.ts` owns aligned pairs from one audio-bearing video asset. Pair placement, linking/unlinking and clip timing edits validate a temporary snapshot before making one mutation in the owning store.
 
-This directory does not implement the feature yet. Keep implementation in this owner, expose editing actions through the shared service/MCP, and add real behaviour checks before marking support complete.
+Core clip operations keep members aligned, reject locked partners and undo together. Split/duplicate create independent pair identities. Save/load preserves the optional schema-1 `clipLinks` field. Unsupported one-sided ripple propagation is refused before changing the project.
 
-See the [folder guide](../../../../FOLDER-STRUCTURE.md) and [current support](../../../../docs/STATUS.md).
+The current profile supports one video member and one audio member with identical timing/source ranges. Offset groups and multiple-audio groups are not implemented. See [linked editing](../../../../docs/LINKED-MEDIA.md).

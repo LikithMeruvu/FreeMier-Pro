@@ -55,7 +55,7 @@ packages/gui/
       state.js       Display state and decoded-media caches
       events.js      Common shortcuts and workspace buttons
       transport.js   Play, pause, seeking and selection
-      projects.js    Open and Save requests
+      projects.js    New, settings, Open and Save requests
     connection/client.js  Sends commands and receives the current project
     components/controls.js Reusable buttons, inputs, labels and messages
     styles/app.css        Colours, sizes, spacing and appearance
@@ -96,11 +96,12 @@ packages/engine/src/
   project/
     store.ts        Owns the project and sends change notifications
     persistence.ts  Reads/writes project JSON and handles legacy paths
+    settings.ts     Changes project name/dimensions; safely checks frame-rate changes
     validation.ts   Checks project data before accepting it
   history/snapshots.ts Keeps bounded undo and redo snapshots
   library/assets.ts   Adds imported media descriptions to the project
   timeline/
-    tracks.ts       Adds/removes tracks
+    tracks.ts       Adds/removes/reorders tracks without reversing unrelated layers
     operations.ts   Changes track settings
     queries.ts      Finds clips, gaps, timing and duration
     inspect.ts      Returns a complete timeline description
@@ -116,7 +117,7 @@ packages/engine/src/
   captions/operations.ts  Subtitle text, timing and style
   markers/operations.ts   Timeline notes
   presets/operations.ts   Captures, validates, imports and applies effect presets
-  linked-media/     Reserved: sound/picture links and grouped edits
+  linked-media/operations.ts Aligned sound/picture pairs and atomic paired edits
   sequences/        Reserved: multiple and nested timelines
   multicam/         Reserved: switching between camera angles
   speed/            Reserved: speed changes, reverse and time remapping
@@ -132,6 +133,8 @@ packages/engine/src/
 Current colour changes are built-in effects, so their rules live in `effects/operations.ts`. Layered clips already work through tracks. Reserved folders will own richer behaviour when developed. `audio/operations.ts` is not a complete mixer. Animated text and transitions still need working rules, rendering, controls and tests.
 
 Put feature checks in `packages/engine/test/<feature>/`. `test/integration/` checks edits involving several features together.
+
+`test/linked-media/` covers paired edits, rollback, locks, ripple propagation and saved links. `test/project/settings.test.ts` covers project settings and track ordering. Electron checks in `gui/test/acceptance/linked-media.mjs` and `project-tracks.mjs` exercise the actual visible controls. Linked editing currently supports one aligned video/audio pair, not offset or multiple-audio groups.
 
 ## Media: pictures, sound and export
 
@@ -166,12 +169,13 @@ packages/service/src/
   commands/
     context.ts             Defines what a command can use
     registry.ts            Collects commands in the existing public order
-    project.ts             Project create/info/save/load requests
+    project.ts             Project create/info/settings/save/load and track reorder requests
     history.ts             Undo and redo requests
     media.ts               Probe/import/thumbnail/waveform requests
     tracks.ts              Track requests
     timeline.ts            Timeline queries
     clips.ts               Basic clip editing requests
+    linked-media.ts        Paired placement, link and unlink requests
     advanced-clips.ts      Slip, rolling trim and duplicate requests
     keyframes.ts           Animation requests
     effects.ts             Effect requests
@@ -213,7 +217,7 @@ packages/mcp/src/
   index.ts             Keeps public imports working
 ```
 
-Agents still start `packages/mcp/dist/cli.js`. There are still 67 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process.
+Agents still start `packages/mcp/dist/cli.js`. There are 72 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen.
 
 ## Shared: common definitions
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { CommandDefinition } from './context.js';
 import { ok } from './helpers.js';
 import { loadOwnedProject, saveOwnedProject } from '../persistence/projects.js';
+import { updateProjectSettings, reorderTrack } from '@freemier/engine';
 
 export const PROJECT_COMMANDS: CommandDefinition[] = [
   {
@@ -49,6 +50,31 @@ export const PROJECT_COMMANDS: CommandDefinition[] = [
       ctx.store.load(project);
       ctx.notify({ kind: 'project', ids: [project.id] });
       return ok({ id: project.id, name: project.name });
+    },
+  },
+  {
+    name: 'project_update', title: 'Update project settings',
+    description: 'Change the project name or output dimensions. Frame rate changes are refused while timing-authored content exists.',
+    inputSchema: {
+      name: z.string().min(1).max(120).optional(),
+      width: z.number().int().min(1).max(8192).optional(),
+      height: z.number().int().min(1).max(8192).optional(),
+      fps: z.number().min(1).max(240).optional(),
+    },
+    handler: async (a, ctx) => {
+      const project = updateProjectSettings(ctx.store, a as { name?: string; width?: number; height?: number; fps?: number });
+      ctx.notify({ kind: 'project', ids: [project.id] });
+      return ok({ id: project.id, name: project.name, width: project.timeline.width, height: project.timeline.height, fps: project.timeline.fps });
+    },
+  },
+  {
+    name: 'track_reorder', title: 'Reorder track',
+    description: 'Move a track one visible position up or down atomically. Both tracks must be unlocked.',
+    inputSchema: { trackId: z.string(), direction: z.enum(['up', 'down']) },
+    handler: async (a, ctx) => {
+      const moved = reorderTrack(ctx.store, a.trackId as string, a.direction as 'up' | 'down');
+      ctx.notify({ kind: 'track', ids: [a.trackId as string] });
+      return ok({ moved, trackId: a.trackId });
     },
   },
   {

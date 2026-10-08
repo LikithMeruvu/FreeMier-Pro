@@ -75,9 +75,8 @@ export function bindTimelineEvents(ui) {
     const rect = ui.canvas.getBoundingClientRect(), track = ui.tracks()[Math.floor((event.clientY - rect.top + ui.$('timeline-scroll').scrollTop - ui.RULER_H) / ui.TRACK_H)];
     if (!track)
       return;
-    const source = id === ui.sourceAssetId, result = await ui.command('clip_add', { trackId: track.id, assetId: id, start: ui.snapped((event.clientX - rect.left + ui.$('timeline-scroll').scrollLeft) / ui.pps), sourceIn: source ? ui.sourceIn : 0, duration: source ? ui.sourceOut - ui.sourceIn : undefined, strict: true });
-    if (result)
-      ui.select(result.clip.id);
+    const source = id === ui.sourceAssetId;
+    await ui.placeAsset(ui.project.media.find((asset) => asset.id === id), track.id, { start: ui.snapped((event.clientX - rect.left + ui.$('timeline-scroll').scrollLeft) / ui.pps), sourceIn: source ? ui.sourceIn : 0, duration: source ? ui.sourceOut - ui.sourceIn : undefined, strict: true });
   });
   for (const button of document.querySelectorAll('[data-tool]'))
     button.addEventListener('click', () => ui.setTool(button.dataset.tool));
