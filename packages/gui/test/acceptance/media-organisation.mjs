@@ -142,7 +142,7 @@ try {
   await input('#media-bin-create-name', 'Temporary bin', 'input');
   await click('#media-bin-create');
   const temporaryBin = await waitFor('created bin from visible controls', async () => (await call('media_bins')).bins.find((bin) => bin.name === 'Temporary bin'));
-  await input('#media-bin-filter', temporaryBin.id);
+  await waitFor('created bin painted and selected by visible controls', () => evaluate(`(()=>{const filter=document.querySelector('#media-bin-filter');return !!filter.querySelector('option[value="${temporaryBin.id}"]')&&filter.value==='${temporaryBin.id}'})()`));
   await input('#media-bin-parent', childBin.id);
   await click('#media-bin-move');
   await waitFor('moved bin parent', async () => (await call('media_bins')).bins.find((bin) => bin.id === temporaryBin.id)?.parentId === childBin.id);
