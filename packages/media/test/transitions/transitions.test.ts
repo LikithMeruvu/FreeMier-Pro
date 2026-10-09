@@ -57,6 +57,33 @@ async function pixels(file: string) {
 const pixel = (frames: Buffer, index: number, x = W / 2, y = H / 2) => [...frames.subarray((index * W * H + y * W + x) * 3, (index * W * H + y * W + x) * 3 + 3)];
 
 describe('native duration-preserving transitions', () => {
+  it('separates audio/video input ownership while reusing each source within its role', () => {
+    const store = EditorStore.create({ width: W, height: H, fps: FPS });
+    const asset = addMediaAsset(store, {
+      id: 'synthetic-av', path: 'synthetic-av.mp4', copied: false, name: 'Synthetic AV', kind: 'video',
+      duration: 6, width: W, height: H, fps: FPS, hasAudio: true, sampleRate: 48000,
+      videoCodec: 'h264', audioCodec: 'aac', probedAt: 0,
+    });
+    const pairs = new Map<string, ReturnType<typeof addClip>[]>();
+    for (const track of store.project.timeline.tracks) {
+      pairs.set(track.kind, [
+        addClip(store, { trackId: track.id, assetId: asset.id, start: 0, sourceIn: 1, duration: 2 }),
+        addClip(store, { trackId: track.id, assetId: asset.id, start: 2, sourceIn: 3, duration: 2 }),
+      ]);
+    }
+    for (const [kind, clips] of pairs) addTransition(store, { leftClipId: clips[0]!.id, rightClipId: clips[1]!.id, type: kind === 'video' ? 'dissolve' : 'audio_crossfade', durationFrames: 10 });
+    const { args } = buildExportArgs(store.project, { outputPath: 'unused.mp4' });
+    expect(args.filter(argument => argument === '-i')).toHaveLength(2);
+    const graph = args[args.indexOf('-filter_complex') + 1]!;
+    const videoInputs = [...graph.matchAll(/\[(\d+):v\]/g)].map(match => Number(match[1]));
+    const audioInputs = [...graph.matchAll(/\[(\d+):a\]/g)].map(match => Number(match[1]));
+    // Both ordinary clips and dissolve endpoints retain the video's input;
+    // both audio windows share a different decoder input.
+    expect(videoInputs).toHaveLength(4); expect(audioInputs).toHaveLength(2);
+    expect(new Set(videoInputs).size).toBe(1); expect(new Set(audioInputs).size).toBe(1);
+    expect(videoInputs[0]).not.toBe(audioInputs[0]);
+  });
+
   it.each(['center', 'start', 'end'] as const)('decodes %s odd-frame dissolve at the derived interval without shifting the cut', async alignment => {
     const fixture = await setup('dissolve', alignment, 9), project = fixture.project();
     const resolved = resolveTransition(project.timeline, project.media, fixture.transition);

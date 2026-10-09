@@ -86,7 +86,8 @@ export function buildExportArgs(
   const height = opts.height ?? timeline.height;
   const fps = timeline.fps;
 
-  // Collect the assets actually used, in a stable order, and index them.
+  // Separate audio decoding from completed video trims. Reuse an input only
+  // within its media role so video filter EOF cannot cut off source audio.
   const usedAssets = new Map<string, number>();
   const inputs: string[] = [];
   const clipRefs: ClipRef[] = [];
@@ -110,7 +111,8 @@ export function buildExportArgs(
           assetId: clip.assetId,
         });
       }
-      let idx = usedAssets.get(asset.id);
+      const inputKey = JSON.stringify([asset.id, track.kind]);
+      let idx = usedAssets.get(inputKey);
       if (idx === undefined) {
         if (asset.copied && !path.isAbsolute(asset.path) && !opts.mediaDirectory) {
           throw new EditorError('INVALID_ARGUMENT', 'Copied media requires a mediaDirectory for export', { assetId: asset.id });
@@ -119,7 +121,7 @@ export function buildExportArgs(
           ? path.resolve(opts.mediaDirectory!, asset.path)
           : asset.path;
         idx = inputIndex++;
-        usedAssets.set(asset.id, idx);
+        usedAssets.set(inputKey, idx);
         if (asset.kind === 'image') {
           // Images need a loop + explicit duration or they contribute one frame.
           inputs.push('-loop', '1', '-t', f(asset.duration), '-i', source);
