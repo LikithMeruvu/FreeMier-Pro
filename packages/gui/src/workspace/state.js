@@ -17,6 +17,7 @@ export function createViewState() {
   ui.snap = true;
   ui.pps = 90;
   ui.grid = true;
+  ui.workspaceSettings = null;
   ui.eventEpoch = null;
   ui.eventSequence = -1;
   ui.sourceAssetId = null;

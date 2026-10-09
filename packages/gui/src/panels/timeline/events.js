@@ -80,11 +80,12 @@ export function bindTimelineEvents(ui) {
   });
   for (const button of document.querySelectorAll('[data-tool]'))
     button.addEventListener('click', () => ui.setTool(button.dataset.tool));
-  ui.$('btn-snap').addEventListener('click', () => { ui.snap = !ui.snap; ui.$('btn-snap').classList.toggle('active', ui.snap); });
+  ui.$('btn-snap').addEventListener('click', () => ui.persistWorkspacePatch({ snap: !ui.snap }));
   ui.$('btn-duplicate').addEventListener('click', ui.duplicateSelected);
   ui.$('btn-delete').addEventListener('click', ui.deleteSelected);
   ui.$('timeline-zoom').addEventListener('input', () => { ui.pps = Number(ui.$('timeline-zoom').value); ui.renderTimeline(); });
-  ui.$('zoom-fit').addEventListener('click', () => { ui.pps = Math.max(20, Math.min(300, ui.$('timeline-scroll').clientWidth / Math.max(ui.duration() + .5, 1))); ui.$('timeline-zoom').value = ui.pps; ui.renderTimeline(); });
+  ui.$('timeline-zoom').addEventListener('change', () => ui.persistWorkspacePatch({ timelineZoom: ui.pps }));
+  ui.$('zoom-fit').addEventListener('click', () => { ui.pps = Math.max(20, Math.min(300, ui.$('timeline-scroll').clientWidth / Math.max(ui.duration() + .5, 1))); ui.$('timeline-zoom').value = ui.pps; ui.renderTimeline(); ui.persistWorkspacePatch({ timelineZoom: ui.pps }); });
   ui.$('timeline-scroll').addEventListener('scroll', () => { ui.$('track-headers').scrollTop = ui.$('timeline-scroll').scrollTop; ui.renderTimeline(); });
   new ResizeObserver(ui.renderTimeline).observe(ui.$('timeline-scroll'));
   ui.$('btn-add-video').addEventListener('click', () => ui.command('track_add', { kind: 'video' }));

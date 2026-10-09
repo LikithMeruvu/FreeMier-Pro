@@ -79,7 +79,7 @@ packages/gui/
       jobs/             Reserved: background tasks and cancellation
       scopes/           Reserved: colour/audio measurements
       plugins/          Reserved: installed plugin controls
-      settings/         Reserved: preferences and saved workspace layouts
+      settings/settings.js  Preferences and saved panel layouts
   test/acceptance/    Checks that open and operate the real Electron app
 ```
 
@@ -186,6 +186,7 @@ packages/service/src/
     keyframes.ts           Animation requests
     effects.ts             Effect requests
     capabilities.ts        Current effect/control descriptions
+    workspace.ts           User preferences and named panel-layout requests
     export.ts              Export and export-plan requests
     markers.ts             Marker requests
     titles.ts              Title requests
@@ -194,6 +195,7 @@ packages/service/src/
     helpers.ts             Common responses and media-path helpers
   connection/bridge.ts     Live updates, GUI commands and media routes
   persistence/projects.ts  Packages copied media on save and opens projects
+  settings/workspace.ts    Owns user preferences, atomic saves and recovery backups
   jobs/export.ts           Coordinates native exports and progress
   library/relink.ts        Verify replacement files and switch one asset location atomically
   library/import/presets.ts Reads bounded portable effect-preset files
@@ -207,7 +209,7 @@ packages/service/src/
 
 Commands keep their name, description and input fields here. GUI and MCP use the same handlers. Editing rules belong in engine; native file processing belongs in media. Service joins them. Export progress works today; a full queue and cancellation remain planned.
 
-`test/session/` checks that MCP and GUI requests use the exact same store and workspace. `test/connection/` checks live updates, media routes and failures. `test/library/` checks native relink, retained copies, concurrent-edit refusals and cache recovery.
+`test/session/` checks that MCP and GUI requests use the exact same store and workspace. `test/connection/` checks live updates, media routes and failures. `test/library/` checks native relink, retained copies, concurrent-edit refusals and cache recovery. `test/settings/` checks atomic preference writes, restart, recovery backups, bounded reads, path checks and settings events that leave project history untouched.
 
 ## MCP: the AI connection
 
@@ -224,7 +226,7 @@ packages/mcp/src/
   index.ts             Keeps public imports working
 ```
 
-Agents still start `packages/mcp/dist/cli.js`. There are 87 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen. `transitions.test.ts` checks transition discovery, edits, locks, history, portable reopen and decoded blended picture/sound.
+Agents still start `packages/mcp/dist/cli.js`. There are 94 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen. `transitions.test.ts` checks transition discovery, edits, locks, history, portable reopen and decoded blended picture/sound. `workspace-settings.test.ts` checks user layouts, independent history, restart and backed-up recovery.
 
 ## Shared: common definitions
 
@@ -241,6 +243,7 @@ packages/shared/src/
   captions/srt.ts           Reads/writes plain SRT files
   markers/validation.ts     Marker fields and validation
   resources/presets.ts      Preset descriptions, fields and compatibility
+  workspace/settings.ts     User layout fields, defaults and strict validation
   errors/index.ts           Structured error codes and messages
   index.ts                  Shares common definitions
 ```
@@ -261,6 +264,7 @@ Program code and a user's imported files are different things. Importing a prese
 | Personal library | Planned app-data storage outside Git, shared across projects. `service/library/storage/` will manage it; not implemented yet. |
 | Portable project resources | Planned `resources/` inside saved projects for fonts, LUTs and templates; the current schema has no general resource bundle. |
 | Cache | Workspace `cache/` for rebuildable thumbnails, waveforms and text images. |
+| Workspace preferences | Workspace `settings/workspace.json` stores the current panel layout and named layouts, separately from projects. Invalid settings remain untouched until explicit backed-up recovery. |
 
 The personal library is part of the final product scope now. Its planned categories are:
 

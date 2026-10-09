@@ -1,5 +1,6 @@
 import type { EditorStore } from '@freemier/engine';
 import { z } from 'zod';
+import type { WorkspaceSettingsOwner } from '../settings/workspace.js';
 
 export interface CommandContext {
   store: EditorStore;
@@ -7,6 +8,8 @@ export interface CommandContext {
   notify: (event: { kind: string; ids: string[] }) => void;
   /** Directory used for project files, exports, and caches. */
   workspace: string;
+  /** Shared service-owned preferences, independent of the editable project. */
+  workspaceSettings?: WorkspaceSettingsOwner;
 }
 
 export interface CommandDefinition {

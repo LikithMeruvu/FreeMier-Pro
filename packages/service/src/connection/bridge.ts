@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { COMMANDS as TOOLS } from '../commands/registry.js';
 import { exportSession } from '../jobs/export.js';
 import { resolveMediaPath } from '../commands/helpers.js';
+import { getWorkspaceSettingsOwner, type WorkspaceSettingsOwner } from '../settings/workspace.js';
 
 /**
  * Live-sync bridge.
@@ -29,6 +30,7 @@ export interface BridgeOptions {
   port?: number;
   /** Directory used for thumbnails, waveforms, and exports. */
   workspace: string;
+  workspaceSettings?: WorkspaceSettingsOwner;
 }
 
 interface SseClient {
@@ -39,11 +41,13 @@ interface SseClient {
 export class LiveBridge {
   readonly #store: EditorStore;
   readonly #workspace: string;
+  readonly #workspaceSettings: WorkspaceSettingsOwner;
   readonly #clients = new Set<SseClient>();
   #server: HttpServer | null = null;
   #nextClientId = 1;
   #port: number;
   #unsubscribe: (() => void) | null = null;
+  #unsubscribeSettings: (() => void) | null = null;
   #thumbnails = new Map<string, Promise<string>>();
   #waveforms = new Map<string, Promise<number[]>>();
   #mediaLocations = new Map<string, string>();
@@ -54,6 +58,7 @@ export class LiveBridge {
   constructor(opts: BridgeOptions) {
     this.#store = opts.store;
     this.#workspace = opts.workspace;
+    this.#workspaceSettings = opts.workspaceSettings ?? getWorkspaceSettingsOwner(opts.workspace);
     this.#port = opts.port ?? 4317;
     for (const asset of opts.store.project.media) this.#mediaLocations.set(asset.id, `${asset.copied}:${asset.path}`);
   }
@@ -68,6 +73,7 @@ export class LiveBridge {
 
   /** Start listening. Resolves once bound. Pass port 0 for an ephemeral port. */
   async start(): Promise<number> {
+    await this.#workspaceSettings.ready;
     const server = createServer((req, res) => this.#handle(req, res));
     this.#server = server;
 
@@ -84,8 +90,11 @@ export class LiveBridge {
         revision: event.revision,
         kind: event.kind,
         ids: event.ids,
-        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch },
+        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch, workspaceSettings: this.#workspaceSettings.snapshot() },
       });
+    });
+    this.#unsubscribeSettings = this.#workspaceSettings.subscribe(workspaceSettings => {
+      this.#broadcast({ type: 'workspace-settings', workspaceSettings });
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -101,6 +110,8 @@ export class LiveBridge {
   async stop(): Promise<void> {
     this.#unsubscribe?.();
     this.#unsubscribe = null;
+    this.#unsubscribeSettings?.();
+    this.#unsubscribeSettings = null;
     for (const client of this.#clients) {
       try { client.res.end(); } catch { /* already closed */ }
     }
@@ -133,7 +144,7 @@ export class LiveBridge {
   }
 
   #snapshot() {
-    return { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch };
+    return { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch, workspaceSettings: this.#workspaceSettings.snapshot() };
   }
 
   /** Read and parse a JSON request body, bounded to 1 MB. */
@@ -168,7 +179,7 @@ export class LiveBridge {
       if (!tool || action === 'export_video') throw new EditorError('INVALID_ARGUMENT', 'Unknown bridge command', { action });
       const parsed = z.object(tool.inputSchema).safeParse(body);
       if (!parsed.success) throw new EditorError('INVALID_ARGUMENT', 'Invalid command arguments', { issues: parsed.error.issues });
-      const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, notify: () => { } });
+      const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, workspaceSettings: this.#workspaceSettings, notify: () => { } });
       if (typeof result !== 'object' || result === null || Array.isArray(result)) throw new EditorError('INTERNAL', 'Bridge tool must return an object');
       this.#json(res, 200, { ...result, _bridge: this.#snapshot() });
     } catch (err) {

@@ -10,3 +10,4 @@ export * from './project/ids.js';
 export * from './project/types.js';
 export * from './resources/presets.js';
 export * from './titles/style.js';
+export * from './workspace/settings.js';

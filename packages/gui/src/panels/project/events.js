@@ -10,7 +10,7 @@ export function bindProjectEvents(ui) {
     }
   });
   ui.$('bin-search').addEventListener('input', () => ui.browser === 'project' ? void ui.queryMedia(true) : ui.renderMediaBin());
-  ui.$('bin-view').addEventListener('click', () => { ui.grid = !ui.grid; ui.$('bin-view').textContent = ui.grid ? '▦' : '☷'; ui.renderMediaBin(); });
+  ui.$('bin-view').addEventListener('click', () => ui.persistWorkspacePatch({ grid: !ui.grid }));
   ui.$('media-bin-filter').addEventListener('change', () => { void ui.refreshMediaBins(); void ui.queryMedia(true); });
   for (const id of ['media-kind-filter', 'media-sort'])
     ui.$(id).addEventListener('change', () => void ui.queryMedia(true));
@@ -39,5 +39,5 @@ export function bindProjectEvents(ui) {
     ui.setUnverifiedConsent(event.currentTarget.checked ? ui.getSelectedMediaIds()[0] ?? null : null);
   });
   for (const button of document.querySelectorAll('[data-browser]'))
-    button.addEventListener('click', () => { ui.browser = button.dataset.browser; ui.$('bin-search').value = ''; document.querySelectorAll('[data-browser]').forEach((b) => b.classList.toggle('active', b === button)); ui.renderMediaBin(); });
+    button.addEventListener('click', () => { ui.$('bin-search').value = ''; ui.setWorkspaceBrowser(button.dataset.browser); });
 }

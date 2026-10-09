@@ -49,7 +49,7 @@ async function setup() {
 describe('transitions through a standard MCP client', () => {
   it('discovers descriptive commands and refuses stale revisions and locked linked partners atomically', async () => {
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(87);
+    expect(tools).toHaveLength(94);
     for (const name of ['transition_add', 'transition_update', 'transition_remove', 'transition_list', 'transition_catalog']) {
       const tool = tools.find((t) => t.name === name)!;
       expect(tool.description!.length).toBeGreaterThan(80); expect(tool.inputSchema.type).toBe('object');

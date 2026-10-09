@@ -38,7 +38,7 @@ export function bindWorkspaceEvents(ui) {
   });
   ui.$('program-monitor').addEventListener('pointerdown', () => ui.sourceFocused = false);
   for (const button of document.querySelectorAll('#workspace-tabs [data-workspace]'))
-    button.addEventListener('click', () => { ui.workspace = button.dataset.workspace; document.body.dataset.workspace = ui.workspace; document.querySelectorAll('#workspace-tabs button').forEach((b) => b.classList.toggle('active', b === button)); ui.renderInspector(); });
+    button.addEventListener('click', () => ui.setWorkspaceMode(button.dataset.workspace));
   window.addEventListener('resize', () => { ui.renderTimeline(); ui.drawProgram(); });
   ui.api?.onCheckState?.(ui.report);
 }

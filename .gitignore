@@ -9,6 +9,10 @@ out/
 workspace/
 !packages/gui/src/workspace/
 !packages/gui/src/workspace/**
+!packages/shared/src/workspace/
+!packages/shared/src/workspace/**
+!packages/shared/test/workspace/
+!packages/shared/test/workspace/**
 .freemier/
 .palmier/
 .planning/

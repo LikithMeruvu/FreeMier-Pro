@@ -6,6 +6,9 @@ export function registerConnectionClient(ui) {
       const result = await (await fetch(ui.BRIDGE + '/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json();
       if (!result.ok)
         throw new Error(result.error?.message ?? 'Command failed');
+      const workspaceSettings = result.workspaceSettings ?? result.data?.workspaceSettings ?? result._bridge?.workspaceSettings ?? result.data?._bridge?.workspaceSettings;
+      if (workspaceSettings)
+        ui.receiveWorkspaceSettings?.(workspaceSettings, false);
       if (result._bridge)
         ui.applyState(result._bridge.project, result._bridge.revision, result._bridge);
       return result;
@@ -19,6 +22,7 @@ export function registerConnectionClient(ui) {
   function applyState(next, nextRevision, history = {}) {
     if (!next?.timeline)
       return;
+    ui.receiveWorkspaceSettings?.(history.workspaceSettings, false);
     if (history.eventEpoch !== undefined && history.eventSequence !== undefined) {
       if (ui.eventEpoch === history.eventEpoch && history.eventSequence <= ui.eventSequence && ui.project)
         return;
@@ -106,7 +110,14 @@ export function registerConnectionClient(ui) {
 
   function connect() {
     const source = new EventSource(ui.BRIDGE + '/events');
-    source.onopen = () => { ui.$('live-status').className = 'live-status on'; ui.$('live-text').textContent = 'Live MCP'; };
+    let reconnectGeneration = 0;
+    source.onopen = () => {
+      const generation = ++reconnectGeneration;
+      ui.$('live-status').className = 'live-status on'; ui.$('live-text').textContent = 'Live MCP';
+      void fetch(ui.BRIDGE + '/state').then((response) => response.json()).then((state) => {
+        if (generation === reconnectGeneration) ui.receiveWorkspaceSettings?.(state.workspaceSettings, true);
+      }).catch(() => {});
+    };
     source.onerror = () => { ui.$('live-status').className = 'live-status off'; ui.$('live-text').textContent = 'Reconnecting'; };
     source.onmessage = ({ data }) => {
       let event;
@@ -117,8 +128,11 @@ export function registerConnectionClient(ui) {
         return;
       }
       // SSE is ordered. Undo restores an earlier snapshot revision and must repaint.
-      if (event.type === 'snapshot' || event.type === 'change')
+      if (event.type === 'snapshot' || event.type === 'change') {
+        ui.receiveWorkspaceSettings?.(event.state?.workspaceSettings, event.type === 'snapshot');
         ui.applyState(event.state.project ?? event.state, event.revision, event.state);
+      } else if (event.type === 'workspace-settings')
+        ui.receiveWorkspaceSettings?.(event.workspaceSettings, false);
       else if (event.type === 'export-progress')
         ui.showProgress(event.fraction);
     };
