@@ -62,6 +62,7 @@ try {
   await input('#transition-left', audioLeft.id); await input('#transition-right', audioRight.id); await input('#transition-type', 'audio_crossfade'); await input('#transition-frames', '30');
   await click('#transition-add');
   await waitFor('visible audio crossfade', async () => (await state()).project.timeline.transitions?.length === 2);
+  await waitFor('painted audio crossfade marker', () => evaluate(`document.querySelectorAll('#timeline-area .transition-marker').length===2`));
   assert.equal(await evaluate(`document.querySelectorAll('#timeline-area .transition-marker').length===2`), true);
   await input('#timecode-input', '00:00:01:00');
   await waitFor('decoded transition interval and equal audio gains', () => evaluate(`(()=>{const videos=[...document.querySelectorAll('#preview-stage video')],audios=[...document.querySelectorAll('#preview-stage audio')];return videos.length===2&&videos.every(el=>el.readyState>=2)&&audios.length===2&&audios.every(el=>el.readyState>=2&&Math.abs(Number(el.dataset.gain)-.5)<.02)})()`));
