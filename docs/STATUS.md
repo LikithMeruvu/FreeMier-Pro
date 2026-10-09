@@ -28,7 +28,7 @@ The preceding linked-media/project-control milestone passed Windows checks and [
 
 Current automated results are available in [GitHub Actions](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workflows/verify.yml). Repeatable desktop startup and supported-platform verification remain part of release reliability work. Counts describe the available checks, not a guarantee that every run or editing workload succeeds.
 
-The transition milestone adds five commands without changing the previous 82 input schemas. Its Windows checks include actual blended pixels, complementary sound, transparent layers, rotation, real stream-handle checks and reversed saved clip order. Linux verification of independent audio-clip decoding is pending. Earlier runs exposed sound loss when several clips reused a source input. See [transition support](TRANSITIONS.md).
+The transition milestone adds five commands without changing the previous 82 input schemas. Its Windows checks include actual blended pixels, complementary sound, transparent layers, rotation, real stream-handle checks and reversed saved clip order. The build, all 353 tests and all actual Electron/Xvfb workflows also passed [Linux CI on the verified repair commit](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37946475018), including the independent audio-clip decoding regression. See [transition support](TRANSITIONS.md).
 
 ## Current limits
 

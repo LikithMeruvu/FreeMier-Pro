@@ -1,6 +1,6 @@
 # Transitions
 
-A transition joins two neighbouring clips. A **video dissolve** gradually changes one picture into the next. An **audio crossfade** gradually changes one sound into the next. The supported profile passed Windows acceptance; consult the [completion tracker](FEATURE-COMPLETION.md) for platform evidence.
+A transition joins two neighbouring clips. A **video dissolve** gradually changes one picture into the next. An **audio crossfade** gradually changes one sound into the next. The supported profile passed Windows and Linux acceptance; consult the [completion tracker](FEATURE-COMPLETION.md) for platform evidence.
 
 Both clips stay in their original positions. The cut and total project length stay the same. The editor reads extra picture frames or sound samples from the source files around that cut. If there is not enough source material, it refuses the transition rather than inventing frames.
 
