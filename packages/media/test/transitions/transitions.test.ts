@@ -3,11 +3,12 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { EditorStore, addClip, addMediaAsset, addTrack, updateClip } from '@freemier/engine';
+import { EditorStore, addClip, addMediaAsset, addTrack, addTransition, updateClip } from '@freemier/engine';
 import { blendTransitionPixel, resolveTransition, type Project, type Transition } from '@freemier/shared';
 import { buildExportArgs, exportProject } from '../../src/export/export.js';
 import { probeMedia } from '../../src/import/media.js';
 import { preflightTransitionStreams } from '../../src/rendering/transitions.js';
+import { runFfmpeg } from '../../src/providers/ffmpeg/run.js';
 
 const exec = promisify(execFile), W = 64, H = 48, FPS = 10;
 let dir: string, red: string, blue: string, gray: string, toneA: string, toneB: string, short: string, shortAudio: string, temporal: string, delayedAudio: string, shiftedVideo: string, offGridVideo: string, mixedRateVideo: string;
@@ -175,4 +176,83 @@ describe('native duration-preserving transitions', () => {
     const fixture = await setup('dissolve', 'center', 10, offGridVideo);
     await expect(preflightTransitionStreams(fixture.project())).rejects.toMatchObject({ code: 'UNSUPPORTED', details: expect.objectContaining({ reason: 'frame_geometry' }) });
   });
+
+  it('preserves compressed AAC source crossfade gains with combined/audio-only graphs and AAC/PCM outputs', async () => {
+    const store = EditorStore.create({ width: 96, height: 64, fps: FPS });
+    const videoTrack = store.project.timeline.tracks.find(track => track.kind === 'video')!;
+    const audioTrack = store.project.timeline.tracks.find(track => track.kind === 'audio')!;
+    const endpoints = [];
+    for (const [index, color, frequency] of [[0, 'red', 400], [1, 'blue', 800]] as const) {
+      const source = path.join(dir, `compressed-${color}.mp4`);
+      await ff(['-f', 'lavfi', '-i', `color=c=${color}:s=96x64:r=${FPS}:d=6`, '-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=48000:duration=6`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source]);
+      const asset = addMediaAsset(store, await probeMedia(source));
+      endpoints.push({
+        video: addClip(store, { trackId: videoTrack.id, assetId: asset.id, sourceIn: 2, start: index * 2, duration: 2 }),
+        audio: addClip(store, { trackId: audioTrack.id, assetId: asset.id, sourceIn: 2, start: index * 2, duration: 2 }),
+      });
+    }
+    addTransition(store, { leftClipId: endpoints[0]!.video.id, rightClipId: endpoints[1]!.video.id, type: 'dissolve', durationFrames: 10 });
+    addTransition(store, { leftClipId: endpoints[0]!.audio.id, rightClipId: endpoints[1]!.audio.id, type: 'audio_crossfade', durationFrames: 10 });
+    const combined = store.project;
+    const audioOnly: Project = { ...combined, timeline: { ...combined.timeline,
+      tracks: combined.timeline.tracks.map(track => track.kind === 'video' ? { ...track, clips: [] } : track),
+      transitions: combined.timeline.transitions!.filter(transition => transition.type === 'audio_crossfade'),
+    } };
+    const toneStats = (pcm: Buffer, frequency: number, time: number, window = .1) => {
+      const first = Math.round((time - window / 2) * 48000), count = Math.round(window * 48000);
+      let real = 0, imaginary = 0, squares = 0;
+      for (let i = 0; i < count; i++) {
+        const sample = pcm.readFloatLE((first + i) * 4), phase = 2 * Math.PI * frequency * (first + i) / 48000;
+        real += sample * Math.cos(phase); imaginary += sample * Math.sin(phase); squares += sample * sample;
+      }
+      return { amplitude: 2 * Math.hypot(real, imaginary) / count, rms: Math.sqrt(squares / count) };
+    };
+    type Measurement = { time: number; left: number; right: number; left20ms: number; right20ms: number; rms20ms: number };
+    const results: Array<{ graph: string; codec: string; duration?: number; frames?: number; fullLeft?: number; fullRight?: number; measurements?: Measurement[]; error?: string }> = [];
+    // Render every variant before asserting so a failure reports the complete
+    // codec/graph matrix rather than hiding evidence behind its first mismatch.
+    for (const [graph, project] of [['combined', combined], ['audio-only', audioOnly]] as const) {
+      for (const codec of ['aac', 'pcm_s16le'] as const) {
+        const output = path.join(dir, `${graph}-${codec}.${codec === 'aac' ? 'mp4' : 'mkv'}`);
+        const result: typeof results[number] = { graph, codec };
+        try {
+          if (codec === 'aac') await exportProject(project, { outputPath: output, preset: 'ultrafast', crf: 12 });
+          else {
+            await preflightTransitionStreams(project);
+            const { args } = buildExportArgs(project, { outputPath: output, preset: 'ultrafast', crf: 12 });
+            args[args.indexOf('-c:a') + 1] = codec;
+            args.splice(args.indexOf('-b:a'), 2);
+            await runFfmpeg(args, 'PCM crossfade regression');
+          }
+          const { stdout: pcm } = await exec('ffmpeg', ['-v', 'error', '-i', output, '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', 'pipe:1'], { encoding: 'buffer', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+          const fullLeft = toneStats(pcm, 400, 1).amplitude, fullRight = toneStats(pcm, 800, 3).amplitude;
+          result.duration = pcm.length / 4 / 48000;
+          result.frames = (await pixels(output)).length / (96 * 64 * 3);
+          result.fullLeft = fullLeft; result.fullRight = fullRight;
+          result.measurements = [1.75, 2, 2.25].map(time => ({ time,
+            left: toneStats(pcm, 400, time).amplitude / fullLeft, right: toneStats(pcm, 800, time).amplitude / fullRight,
+            left20ms: toneStats(pcm, 400, time, .02).amplitude / fullLeft, right20ms: toneStats(pcm, 800, time, .02).amplitude / fullRight,
+            rms20ms: toneStats(pcm, 400, time, .02).rms,
+          }));
+        } catch (error) { result.error = error instanceof Error ? error.message : String(error); }
+        results.push(result);
+      }
+    }
+    const evidence = `Compressed AAC crossfade matrix: ${JSON.stringify(results)}`;
+    for (const result of results) {
+      expect(result.error, evidence).toBeUndefined();
+      expect(result.frames, evidence).toBe(40);
+      expect(result.duration, evidence).toBeGreaterThanOrEqual(4);
+      expect(result.duration, evidence).toBeLessThan(4.03);
+      expect(result.fullLeft, evidence).toBeGreaterThan(.1);
+      expect(result.fullRight, evidence).toBeGreaterThan(.1);
+      for (const row of result.measurements!) {
+        const left = 2.5 - row.time, right = row.time - 1.5;
+        expect(row.left, evidence).toBeCloseTo(left, 1);
+        expect(row.right, evidence).toBeCloseTo(right, 1);
+        expect(row.left20ms, evidence).toBeCloseTo(left, 1);
+        expect(row.right20ms, evidence).toBeCloseTo(right, 1);
+      }
+    }
+  }, 60000);
 });

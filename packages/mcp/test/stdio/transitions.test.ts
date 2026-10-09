@@ -127,9 +127,16 @@ describe('transitions through a standard MCP client', () => {
     };
     const fullLeft = amplitude(400, 1), fullRight = amplitude(800, 3);
     expect(fullLeft).toBeGreaterThan(.10); expect(fullRight).toBeGreaterThan(.10);
-    for (const [time, leftWeight, rightWeight] of [[1.75, .75, .25], [2, .5, .5], [2.25, .25, .75]]) {
-      expect(amplitude(400, time!) / fullLeft).toBeCloseTo(leftWeight!, 1);
-      expect(amplitude(800, time!) / fullRight).toBeCloseTo(rightWeight!, 1);
+    const measurements = [1.75, 2, 2.25].map(time => ({ time, left: amplitude(400, time) / fullLeft, right: amplitude(800, time) / fullRight }));
+    const expected = [[.75, .25], [.5, .5], [.25, .75]];
+    const mismatch = measurements.some((item, index) => Math.abs(item.left - expected[index]![0]!) >= .05 || Math.abs(item.right - expected[index]![1]!) >= .05);
+    const diagnostic = JSON.stringify({ fullLeft, fullRight, measurements, ...(mismatch ? {
+      transitions: (await call('transition_list')).transitions,
+      exportPlan: (await call('export_preview', { outputPath: output })).summary,
+    } : {}) });
+    for (const [index, [leftWeight, rightWeight]] of [[.75, .25], [.5, .5], [.25, .75]].entries()) {
+      expect(measurements[index]!.left, diagnostic).toBeCloseTo(leftWeight!, 1);
+      expect(measurements[index]!.right, diagnostic).toBeCloseTo(rightWeight!, 1);
     }
     expect((await call('timeline_duration')).duration).toBe(4);
   }, 60000);
