@@ -57,7 +57,7 @@ async function pixels(file: string) {
 const pixel = (frames: Buffer, index: number, x = W / 2, y = H / 2) => [...frames.subarray((index * W * H + y * W + x) * 3, (index * W * H + y * W + x) * 3 + 3)];
 
 describe('native duration-preserving transitions', () => {
-  it('separates audio/video input ownership while reusing each source within its role', () => {
+  it('gives audio clips independent input ownership while reusing video endpoints', () => {
     const store = EditorStore.create({ width: W, height: H, fps: FPS });
     const asset = addMediaAsset(store, {
       id: 'synthetic-av', path: 'synthetic-av.mp4', copied: false, name: 'Synthetic AV', kind: 'video',
@@ -73,15 +73,15 @@ describe('native duration-preserving transitions', () => {
     }
     for (const [kind, clips] of pairs) addTransition(store, { leftClipId: clips[0]!.id, rightClipId: clips[1]!.id, type: kind === 'video' ? 'dissolve' : 'audio_crossfade', durationFrames: 10 });
     const { args } = buildExportArgs(store.project, { outputPath: 'unused.mp4' });
-    expect(args.filter(argument => argument === '-i')).toHaveLength(2);
+    expect(args.filter(argument => argument === '-i')).toHaveLength(3);
     const graph = args[args.indexOf('-filter_complex') + 1]!;
     const videoInputs = [...graph.matchAll(/\[(\d+):v\]/g)].map(match => Number(match[1]));
     const audioInputs = [...graph.matchAll(/\[(\d+):a\]/g)].map(match => Number(match[1]));
-    // Both ordinary clips and dissolve endpoints retain the video's input;
-    // both audio windows share a different decoder input.
+    // Ordinary video clips and dissolve endpoints retain one video input;
+    // each audio window owns a decoder independent of every other trim.
     expect(videoInputs).toHaveLength(4); expect(audioInputs).toHaveLength(2);
-    expect(new Set(videoInputs).size).toBe(1); expect(new Set(audioInputs).size).toBe(1);
-    expect(videoInputs[0]).not.toBe(audioInputs[0]);
+    expect(new Set(videoInputs).size).toBe(1); expect(new Set(audioInputs).size).toBe(2);
+    for (const input of audioInputs) expect(videoInputs).not.toContain(input);
   });
 
   it.each(['center', 'start', 'end'] as const)('decodes %s odd-frame dissolve at the derived interval without shifting the cut', async alignment => {
@@ -280,6 +280,60 @@ describe('native duration-preserving transitions', () => {
         expect(row.left20ms, evidence).toBeCloseTo(left, 1);
         expect(row.right20ms, evidence).toBeCloseTo(right, 1);
       }
+    }
+  }, 60000);
+
+  it('preserves a start-aligned crossfade when one AAC asset supplies three shifted audio clips', async () => {
+    const source = path.join(dir, 'three-audio-branches.mp4');
+    await ff(['-f', 'lavfi', '-i', 'color=c=red:s=320x180:r=30:d=1.5', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=30:d=2.5', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1.5', '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000:duration=2.5', '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v];[2:a][3:a]concat=n=2:v=0:a=1[a]', '-map', '[v]', '-map', '[a]', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source]);
+    const store = EditorStore.create({ width: 320, height: 180, fps: 30 });
+    const asset = addMediaAsset(store, await probeMedia(source));
+    const video = store.project.timeline.tracks.find(track => track.kind === 'video')!, audio = store.project.timeline.tracks.find(track => track.kind === 'audio')!;
+    const left = addClip(store, { trackId: video.id, assetId: asset.id, start: 0, sourceIn: 0, duration: 1 });
+    const right = addClip(store, { trackId: video.id, assetId: asset.id, start: 1, sourceIn: 2, duration: 1 });
+    const audioLeft = addClip(store, { trackId: audio.id, assetId: asset.id, start: 0, sourceIn: 0, duration: 1 });
+    const audioRight = addClip(store, { trackId: audio.id, assetId: asset.id, start: 1, sourceIn: 2, duration: 1 });
+    addClip(store, { trackId: audio.id, assetId: asset.id, start: 2, sourceIn: 0, duration: 2 });
+    addTransition(store, { leftClipId: left.id, rightClipId: right.id, type: 'dissolve', durationFrames: 12, alignment: 'center' });
+    addTransition(store, { leftClipId: audioLeft.id, rightClipId: audioRight.id, type: 'audio_crossfade', durationFrames: 18, alignment: 'start' });
+    const project: Project = { ...store.project, timeline: { ...store.project.timeline, tracks: store.project.timeline.tracks.map(track => ({ ...track, clips: [...track.clips].reverse() })) } };
+    const results: Array<{ codec: string; inputCount?: number; audioChains?: string[]; duration?: number; measurements?: Array<{ time: number; left: number; right: number; left20ms: number; right20ms: number; rms20ms: number }>; error?: string }> = [];
+    for (const codec of ['aac', 'pcm_s16le'] as const) {
+      const output = path.join(dir, `three-clips-${codec}.${codec === 'aac' ? 'mp4' : 'mkv'}`);
+      const result: typeof results[number] = { codec };
+      try {
+        await preflightTransitionStreams(project);
+        const { args } = buildExportArgs(project, { outputPath: output, preset: 'ultrafast', crf: 20 });
+        if (codec !== 'aac') { args[args.indexOf('-c:a') + 1] = codec; args.splice(args.indexOf('-b:a'), 2); }
+        result.inputCount = args.filter(argument => argument === '-i').length;
+        result.audioChains = args[args.indexOf('-filter_complex') + 1]!.split(';').filter(chain => /\[\d+:a\]/.test(chain));
+        await runFfmpeg(args, 'Three audio clips regression');
+        const { stdout: pcm } = await exec('ffmpeg', ['-v', 'error', '-i', output, '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', 'pipe:1'], { encoding: 'buffer', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+        const tone = (time: number, frequency: number, window = .1) => {
+          const start = Math.round(time * 48000), count = Math.round(window * 48000);
+          let real = 0, imaginary = 0, squares = 0;
+          for (let i = 0; i < count; i++) { const sample = pcm.readFloatLE((start + i) * 4), phase = 2 * Math.PI * frequency * i / 48000; real += sample * Math.cos(phase); imaginary += sample * Math.sin(phase); squares += sample * sample; }
+          return { amplitude: 2 * Math.hypot(real, imaginary) / count, rms: Math.sqrt(squares / count) };
+        };
+        result.duration = pcm.length / 4 / 48000;
+        result.measurements = [1.05, 1.3, 1.55, 2.3, 3.7].map(time => ({ time,
+          left: tone(time, 440).amplitude, right: tone(time, 880).amplitude,
+          left20ms: tone(time, 440, .02).amplitude, right20ms: tone(time, 880, .02).amplitude, rms20ms: tone(time, 440, .02).rms,
+        }));
+      } catch (error) { result.error = error instanceof Error ? error.message : String(error); }
+      results.push(result);
+    }
+    const evidence = `Same-asset three-clip crossfade matrix: ${JSON.stringify(results)}`;
+    for (const result of results) {
+      expect(result.error, evidence).toBeUndefined();
+      expect(result.inputCount, evidence).toBe(4);
+      expect(result.duration, evidence).toBeGreaterThanOrEqual(4); expect(result.duration, evidence).toBeLessThan(4.03);
+      const [start, midpoint, end, tailLeft, tailRight] = result.measurements!;
+      expect(start!.left, evidence).toBeGreaterThan(start!.right * 2);
+      expect(midpoint!.left, evidence).toBeGreaterThan(.015); expect(midpoint!.right, evidence).toBeGreaterThan(.015);
+      expect(end!.right, evidence).toBeGreaterThan(end!.left * 2);
+      expect(tailLeft!.left, evidence).toBeGreaterThan(.1);
+      expect(tailRight!.right, evidence).toBeGreaterThan(.1);
     }
   }, 60000);
 });

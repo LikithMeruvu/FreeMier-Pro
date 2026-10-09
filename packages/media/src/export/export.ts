@@ -86,8 +86,8 @@ export function buildExportArgs(
   const height = opts.height ?? timeline.height;
   const fps = timeline.fps;
 
-  // Separate audio decoding from completed video trims. Reuse an input only
-  // within its media role so video filter EOF cannot cut off source audio.
+  // Give each audio trim an independent decoder input so completed video or
+  // audio trims cannot cut off another clip. Video clips still reuse inputs.
   const usedAssets = new Map<string, number>();
   const inputs: string[] = [];
   const clipRefs: ClipRef[] = [];
@@ -111,7 +111,7 @@ export function buildExportArgs(
           assetId: clip.assetId,
         });
       }
-      const inputKey = JSON.stringify([asset.id, track.kind]);
+      const inputKey = JSON.stringify([asset.id, track.kind, track.kind === 'audio' ? clip.id : null]);
       let idx = usedAssets.get(inputKey);
       if (idx === undefined) {
         if (asset.copied && !path.isAbsolute(asset.path) && !opts.mediaDirectory) {

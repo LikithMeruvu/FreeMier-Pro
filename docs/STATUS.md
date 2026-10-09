@@ -22,13 +22,13 @@ Updated 9 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 
 ## Checks
 
-The suite includes **352 tests in 27 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite, **10 linked-media Electron checks**, and media organisation and transition desktop workflows. These all passed on Windows on 9 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
+The suite includes **353 tests in 27 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite, **10 linked-media Electron checks**, and media organisation and transition desktop workflows. These all passed on Windows on 9 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
 
 The preceding linked-media/project-control milestone passed Windows checks and [Linux CI](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37807515970). Media organisation adds ten commands and one optional `binId` field to `media_import`; existing names and other original inputs remain compatible. This new milestone also passed [Linux CI on its exact implementation commit](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37812909590), including build, tests and actual Electron/Xvfb acceptance. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md) and [27-area tracker](FEATURE-COMPLETION.md).
 
 Current automated results are available in [GitHub Actions](https://github.com/LikithMeruvu/FreeMier-Pro/actions/workflows/verify.yml). Repeatable desktop startup and supported-platform verification remain part of release reliability work. Counts describe the available checks, not a guarantee that every run or editing workload succeeds.
 
-The transition milestone adds five commands without changing the previous 82 input schemas. Its Windows checks include actual blended pixels, complementary sound, transparent layers, rotation, real stream-handle checks and reversed saved clip order. Linux verification of the audio-input repair is pending; an earlier run exposed a compressed-source crossfade failure. See [transition support](TRANSITIONS.md).
+The transition milestone adds five commands without changing the previous 82 input schemas. Its Windows checks include actual blended pixels, complementary sound, transparent layers, rotation, real stream-handle checks and reversed saved clip order. Linux verification of independent audio-clip decoding is pending. Earlier runs exposed sound loss when several clips reused a source input. See [transition support](TRANSITIONS.md).
 
 ## Current limits
 

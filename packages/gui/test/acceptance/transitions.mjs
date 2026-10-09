@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { resolveTransition } from '@freemier/shared/transitions';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
@@ -110,6 +111,7 @@ try {
   assert.equal((await state()).project.timeline.tracks.find((track) => track.id === video.id).clips[0].id, right.id, 'reopen must preserve deliberately reversed serialized clip order');
   const reopenedPixel = await previewPixel(1, '00:00:01:00');
   assert.ok(reopenedPixel[0] > 70 && reopenedPixel[2] > 70 && Math.abs(reopenedPixel[0] - reopenedPixel[2]) < 50, `reopened reversed clip order still paints one mixed transition layer: ${reopenedPixel}`);
+  const reopenedProject = (await state()).project;
   await click('#btn-export'); await waitFor('real transition export', () => evaluate(`document.querySelector('#toast').textContent.startsWith('Exported')`), 120000);
   const decodeFrame = async (time) => {
     const { stdout } = await execute(process.env.FREEMIER_FFMPEG ?? 'ffmpeg', ['-v', 'error', '-ss', String(time), '-i', output, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], { encoding: 'buffer', windowsHide: true });
@@ -126,9 +128,15 @@ try {
     for (let i = 0; i < count; i++) { const value = samples[start + i] ?? 0, phase = 2 * Math.PI * frequency * i / 48000; real += value * Math.cos(phase); imaginary += value * Math.sin(phase); }
     return 2 * Math.hypot(real, imaginary) / count;
   };
-  assert.ok(tone(1.05, 440) > tone(1.05, 880) * 2, 'crossfade export starts with left frequency');
-  assert.ok(tone(1.3, 440) > .015 && tone(1.3, 880) > .015, 'crossfade export midpoint contains both frequencies');
-  assert.ok(tone(1.55, 880) > tone(1.55, 440) * 2, 'crossfade export ends with right frequency');
+  const toneMatrix = Object.fromEntries([1.05, 1.3, 1.55].map((time) => [time, { 440: tone(time, 440), 880: tone(time, 880) }]));
+  const transitionSummary = (project) => (project?.timeline?.transitions ?? []).map(transition => {
+    const { startFrame, endFrame } = resolveTransition(project.timeline, project.media, transition);
+    return { type: transition.type, durationFrames: transition.durationFrames, alignment: transition.alignment, startFrame, endFrame };
+  });
+  const audioDiagnostics = JSON.stringify({ toneMatrix, savedTransitions: transitionSummary(savedProject), reopenedTransitions: transitionSummary(reopenedProject), pcmDurationSeconds: samples.length / 48000 });
+  assert.ok(toneMatrix[1.05][440] > toneMatrix[1.05][880] * 2, `crossfade export starts with left frequency; ${audioDiagnostics}`);
+  assert.ok(toneMatrix[1.3][440] > .015 && toneMatrix[1.3][880] > .015, `crossfade export midpoint contains both frequencies; ${audioDiagnostics}`);
+  assert.ok(toneMatrix[1.55][880] > toneMatrix[1.55][440] * 2, `crossfade export ends with right frequency; ${audioDiagnostics}`);
   assert.deepEqual(errors, [], `renderer exceptions: ${errors.join('\n')}\n${log}`);
   console.log('Transition Electron acceptance: visible CRUD/interval marker/undo-lock-save-reopen/decoded revision/export passed.');
 } catch (error) { console.error(error); throw error; }
