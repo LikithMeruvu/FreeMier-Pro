@@ -93,6 +93,7 @@ export function registerConnectionClient(ui) {
     ui.renderTrackHeaders();
     ui.renderTimeline();
     ui.renderInspector();
+    ui.renderTransitionsPanel?.();
     ui.syncPreview();
     ui.updateTransport();
     ui.updateSource();

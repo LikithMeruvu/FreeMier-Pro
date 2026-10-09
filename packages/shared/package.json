@@ -5,6 +5,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./transitions": {
+      "types": "./dist/calculations/transitions.d.ts",
+      "default": "./dist/calculations/transitions.js"
+    },
     "./animation": {
       "types": "./dist/calculations/animation.d.ts",
       "default": "./dist/calculations/animation.js"

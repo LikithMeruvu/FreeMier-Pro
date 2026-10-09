@@ -6,7 +6,7 @@ FreeMier Pro is an independent video editor for Windows and Linux. Each editing 
 |---|---|---|
 | Foundation | Headless engine, media, persistence, undo/redo, live GUI, H.264/HEVC export | Working baseline |
 | Professional editing | Source/program monitors, usable timeline tools, slip/roll/duplicate, track locks, effect/animation rendering | Verified Windows and Linux milestone |
-| Compositing and text | Markers, transitions, titles, captions/subtitles, masks, nested compositions | Markers, titles and SRT captions verified on Windows/Linux; transitions/masks/nests pending |
+| Compositing and text | Markers, transitions, titles, captions/subtitles, masks, nested compositions | Markers, titles and SRT captions verified on Windows/Linux; bounded video dissolve/audio crossfade verified on Windows; masks/nests pending |
 | Media workflows | Bins, sequences, linked AV, proxies/relinking, multicam, interchange | Aligned linked AV verified on Windows/Linux; bins, metadata, media query and verified relink verified on Windows/Linux; sequences/proxies/multicam/interchange planned |
 | Editing and harness completion | Ripple/slide/overwrite, atomic batches, speed/reverse, source/program presentation and rendered-frame tools | Planned |
 | Color and audio | Scopes, richer grading, LUTs, automation, mixing, loudness | Planned |

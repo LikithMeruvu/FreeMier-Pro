@@ -95,6 +95,31 @@ export function registerPanelsTimelineTimeline(ui) {
       ui.ctx.fillStyle = '#58c6bf';
       ui.ctx.fillRect(cue.startMs / 1000 * ui.pps, 23, Math.max(1, (cue.endMs - cue.startMs) / 1000 * ui.pps), 3);
     }
+    const markerLayer = document.createElement('div');
+    markerLayer.className = 'transition-marker-layer';
+    markerLayer.setAttribute('aria-label', 'Timeline transitions');
+    for (const transition of ui.project.timeline.transitions ?? []) {
+      let left, right, track;
+      for (const candidate of ordered) {
+        left = candidate.clips.find((clip) => clip.id === transition.leftClipId);
+        right = candidate.clips.find((clip) => clip.id === transition.rightClipId);
+        if (left && right) { track = candidate; break; }
+      }
+      if (!left || !right || !track) continue;
+      const cut = left.start + left.duration, n = Number(transition.durationFrames), fps = ui.fps();
+      const pre = transition.alignment === 'start' ? 0 : transition.alignment === 'end' ? n : Math.floor(n / 2);
+      const start = cut - pre / fps, end = start + n / fps;
+      const row = ordered.indexOf(track), marker = document.createElement('button');
+      marker.type = 'button'; marker.className = 'transition-marker';
+      marker.dataset.transitionId = transition.id; marker.dataset.start = String(start); marker.dataset.end = String(end);
+      marker.title = `${transition.type}: ${n} frames`;
+      marker.style.left = `${start * ui.pps}px`; marker.style.top = `${ui.RULER_H + row * ui.TRACK_H + 4}px`;
+      marker.style.width = `${Math.max(8, (end - start) * ui.pps)}px`; marker.style.height = `${ui.TRACK_H - 10}px`;
+      marker.addEventListener('click', () => { ui.selectTransition?.(transition); ui.renderTransitions?.(); });
+      markerLayer.append(marker);
+    }
+    ui.$('timeline-area').querySelector('.transition-marker-layer')?.remove();
+    ui.$('timeline-area').append(markerLayer);
     for (let i = 0; i < ordered.length; i++) {
       const track = ordered[i], y = ui.RULER_H + i * ui.TRACK_H;
       if (y + ui.TRACK_H < offsetY || y > offsetY + visibleHeight)

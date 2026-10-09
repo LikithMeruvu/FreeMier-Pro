@@ -74,12 +74,13 @@ export async function runFfmpeg(args: string[], label = 'ffmpeg', options: { cwd
 }
 
 /** Run ffprobe and return parsed JSON. */
-export async function runFfprobe(args: string[]): Promise<unknown> {
+export async function runFfprobe(args: string[], options: { timeout?: number } = {}): Promise<unknown> {
   try {
     const { stdout } = await execFileAsync(config.ffprobePath, args, {
       maxBuffer: 64 * 1024 * 1024,
       windowsHide: true,
       encoding: 'utf8',
+      timeout: options.timeout,
     });
     return JSON.parse(stdout);
   } catch (err) {

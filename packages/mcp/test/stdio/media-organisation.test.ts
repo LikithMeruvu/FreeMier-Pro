@@ -45,7 +45,7 @@ describe('media organisation through a standard MCP client', () => {
       expect(tool.description!.length).toBeGreaterThan(60);
       expect(tool.inputSchema.type).toBe('object');
     }
-    expect(tools).toHaveLength(82);
+    expect(tools).toHaveLength(87);
     await call('project_create', { width: 96, height: 64, fps: 10 });
     const parent = (await call('media_bin_create', { name: 'Footage' })).bin;
     const child = (await call('media_bin_create', { name: 'Interview', parentId: parent.id })).bin;

@@ -148,6 +148,16 @@ export interface ClipLink {
   readonly audioClipId: Id;
 }
 
+/** Source-handle-aware transition that leaves the adjacent clips' timing intact. */
+export interface Transition {
+  readonly id: Id;
+  readonly leftClipId: Id;
+  readonly rightClipId: Id;
+  readonly type: 'dissolve' | 'audio_crossfade';
+  readonly durationFrames: number;
+  readonly alignment: 'center' | 'start' | 'end';
+}
+
 export interface Timeline {
   readonly id: Id;
   readonly name: string;
@@ -155,6 +165,8 @@ export interface Timeline {
   readonly width: number;
   readonly height: number;
   readonly tracks: readonly Track[];
+  /** Optional in schema 1; intervals and source handles are derived from clip timing. */
+  readonly transitions?: readonly Transition[];
   /** Optional in schema 1; each clip belongs to at most one aligned AV pair. */
   readonly clipLinks?: readonly ClipLink[];
   /** Optional in legacy schema-1 projects. Markers never extend render duration. */

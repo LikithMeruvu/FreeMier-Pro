@@ -9,24 +9,24 @@ This tracker follows the same 27 product areas throughout development. Developme
 - **Done** means development is Implemented and acceptance is Accepted. Do not infer acceptance from legacy checks or from a narrower existing capability.
 - Record reviewable checks in the acceptance evidence section before marking an area accepted.
 
-## Current summary — 8 October 2026
+## Current summary — 9 October 2026
 
 | Measure | Count |
 | --- | ---: |
-| Done | 3 / 27 |
-| Incomplete | 24 / 27 |
+| Done | 4 / 27 |
+| Incomplete | 23 / 27 |
 | In development | 0 |
-| Not started | 24 |
+| Not started | 23 |
 | Implemented, waiting for acceptance | 0 |
-| Without final acceptance | 24 |
+| Without final acceptance | 23 |
 
-The current suite passes 315 tests in 23 files, the 40 baseline Electron checks, the standalone font check, the project/track suite, 10 linked-media checks and the media organisation Electron workflow on Windows. The media organisation implementation also passed [Linux CI on its exact commit](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37812909590), including the real Electron suites under Xvfb. Existing regression checks do not establish acceptance for the other 24 areas.
+The current suite passes 350 tests in 27 files, the 40 baseline Electron checks, the standalone font check, the project/track suite, 10 linked-media checks and the media organisation and transition Electron workflows on Windows. Transition acceptance includes actual blended preview pixels, audible output, decoded export and portable reopen with reversed clip array order. Linux verification of this new implementation is pending. Earlier media organisation passed [Linux CI on its exact commit](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37812909590). Existing regression checks do not establish acceptance for the other 23 areas.
 
 ## Fixed area tracker
 
 | ID | Area | Development | Acceptance | Remaining work |
 | ---: | --- | --- | --- | --- |
-| 1 | Transitions | Not started | Not accepted | Add editable transitions with timing, handles, engine and MCP operations, GUI controls, and rendered preview/export. |
+| 1 | Transitions | Implemented | Accepted | Adjacent same-track video dissolve and linear audio crossfade verified through engine/MCP, visible controls, locks/undo, portable reopen and decoded preview/export. Video rates must match the sequence; keyframed/fading participants, mixed/variable-rate dissolves, wipes and plugins remain unsupported extensions. See [limits](TRANSITIONS.md). |
 | 2 | Linked video/audio | Implemented | Accepted | Aligned one-video/one-audio profile verified: paired placement, link/unlink, atomic timing edits/undo, GUI controls, save/reopen, audible preview and decoded export. Offset/multiple-audio groups and non-mirrored ripple remain unsupported extensions. |
 | 3 | Multiple timelines | Not started | Not accepted | Create, name, switch, edit, save, and reopen multiple timelines in one project through engine, MCP, and GUI. |
 | 4 | Multicam | Not started | Not accepted | Sync and switch among camera angles, preserve edits, and verify the resulting preview and export. |
@@ -60,6 +60,7 @@ Record concise evidence here when an area reaches final acceptance: date, platfo
 
 | ID | Evidence |
 | ---: | --- |
+| 1 | Windows, 9 October: [shared frame/alpha checks](../packages/shared/test/calculations/transitions.test.ts), [engine ownership/persistence checks](../packages/engine/test/transitions/transitions.test.ts), 15 [native decoded cases](../packages/media/test/transitions/transitions.test.ts) and three [standard SDK MCP cases](../packages/mcp/test/stdio/transitions.test.ts) verify all alignments, odd frames, real handles, complementary sound, unequal-alpha layers, static rotation/track order and refusal of missing/delayed/off-grid streams. [Actual Electron](../packages/gui/test/acceptance/transitions.mjs) verifies visible add/update/remove/undo, marker intervals, locks, audible playback, decoded preview/export and reopening a portable project with reversed clip arrays. Full build, all 350 tests and all desktop suites passed; 87 tools retain the preceding 82 input schemas. Linux verification pending. |
 | 2 | Windows, 8 October: 32 [engine cases](../packages/engine/test/linked-media/linked-media.test.ts); [standard SDK stdio tests](../packages/mcp/test/stdio/linked-media.test.ts) fully decode exported frames/samples, check source-window timing/silent gaps/level and reopen copied media; [actual Electron suite](../packages/gui/test/acceptance/linked-media.mjs) passes 10 checks covering source/drop placement, linked selection, all paired timing controls, chooser/cancel, locks, undo, decoded audible preview, save/open and export. |
 | 23 | Windows, 8 October: four [engine cases](../packages/engine/test/project/settings.test.ts), including equal-order locked-layer preservation; standard MCP settings/reorder and decoded output-dimension checks; [actual Electron suite](../packages/gui/test/acceptance/project-tracks.mjs) verifies creation/settings, preserved content, fps refusal, undo, save/reopen, visible reorder/rename/remove, locks and authored-track restoration. Only native confirmation/prompt replies are substituted in this headless test. |
 | 15 | Windows and [Linux CI](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37812909590), 8 October: 38 [engine cases](../packages/engine/test/library/organisation.test.ts); [file identity checks](../packages/media/test/identity/source.test.ts) and [failed-import checks](../packages/media/test/identity/import-failure.test.ts); 11 [native service cases](../packages/service/test/library/relink.test.ts) cover refusals, concurrent edits/undo, retained copies, external replacements and cache recovery; three [standard SDK MCP cases](../packages/mcp/test/stdio/media-organisation.test.ts) check discovery, bins/query/history, multiple exact candidates and fully decoded linked picture/sound after relink and portable reopen; [actual Electron workflow](../packages/gui/test/acceptance/media-organisation.mjs) operates bins/import/filter/sort/metadata/save/open/offline/relink, checks delayed thumbnails across edits, and decodes source/export. The exact implementation commit passed Linux build, tests and real Electron/Xvfb acceptance. |

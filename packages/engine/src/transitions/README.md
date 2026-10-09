@@ -1,7 +1,7 @@
 # transitions
 
-Reserved for planned code: Manage joins between clips and their settings.
+`operations.ts` creates, changes, reads and removes source-handle-aware video dissolves and independent linear audio crossfades. Shared calculations derive frame timing; project validation refuses edits that break authored transitions. GUI and MCP use these same engine operations.
 
-This directory does not implement the feature yet. Keep implementation in this owner, expose editing actions through the shared service/MCP, and add real behaviour checks before marking support complete.
+The initial profile requires adjacent clips, sufficient source handles and static participant transforms without enabled clip fades. Video rates must match the sequence. Additional transition types and mixed-rate rendering remain planned.
 
 See the [folder guide](../../../../FOLDER-STRUCTURE.md) and [current support](../../../../docs/STATUS.md).

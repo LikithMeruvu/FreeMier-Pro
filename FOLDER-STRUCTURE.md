@@ -1,6 +1,6 @@
 # FreeMier Pro folder structure
 
-Updated 8 October 2026. This is the main guide to where code belongs. Update it whenever development changes the structure.
+Updated 9 October 2026. This is the main guide to where code belongs. Update it whenever development changes the structure.
 
 **The folders are organised now. A folder name does not mean its feature is finished.** README-only folders reserve places for planned code. See [current support](docs/STATUS.md) for what works.
 
@@ -74,7 +74,7 @@ packages/gui/
       presets/          Browse and apply project effect presets
       markers/          Timeline notes
       export/           Export controls and progress
-      transitions/      Reserved: transition browser and settings
+      transitions/      Video dissolve/audio crossfade controls, timing and selection
       personal-library/ Reserved: reusable user resources across projects
       jobs/             Reserved: background tasks and cancellation
       scopes/           Reserved: colour/audio measurements
@@ -121,7 +121,7 @@ packages/engine/src/
   sequences/        Reserved: multiple and nested timelines
   multicam/         Reserved: switching between camera angles
   speed/            Reserved: speed changes, reverse and time remapping
-  transitions/      Reserved: joins between clips and transition settings
+  transitions/operations.ts Adds/updates/removes transitions with handles, locks and undo
   compositing/      Reserved: masks, blending, overlays and tracking data
   color/            Reserved: grading, LUT and colour-management rules
   resources/        Reserved: imported fonts, LUTs and template references
@@ -130,7 +130,7 @@ packages/engine/src/
   index.ts          Shares the working engine functions
 ```
 
-Current colour changes are built-in effects, so their rules live in `effects/operations.ts`. Layered clips already work through tracks. Reserved folders will own richer behaviour when developed. `audio/operations.ts` is not a complete mixer. Animated text and transitions still need working rules, rendering, controls and tests.
+Current colour changes are built-in effects, so their rules live in `effects/operations.ts`. Layered clips already work through tracks. Reserved folders will own richer behaviour when developed. `audio/operations.ts` is not a complete mixer. Animated text still needs editing rules, rendering, controls and tests. Transitions have a bounded dissolve/crossfade implementation; see [transition support](docs/TRANSITIONS.md) for its limits and acceptance state.
 
 Put feature checks in `packages/engine/test/<feature>/`. `test/integration/` checks edits involving several features together.
 
@@ -149,6 +149,7 @@ packages/media/src/
   waveforms/extract.ts     Reads sound samples and makes waveform peaks
   rendering/effects.ts     Converts effects/keyframes into render instructions
   rendering/text.ts        Makes title/caption images from the bundled font
+  rendering/transitions.ts Blends transition layers and checks actual source handles
   export/export.ts         Builds output settings and renders the timeline
   identity/source.ts       Streaming file identity, availability and bounded candidate discovery
   providers/ffmpeg/run.ts   Starts FFmpeg/ffprobe using argument arrays
@@ -180,6 +181,7 @@ packages/service/src/
     timeline.ts            Timeline queries
     clips.ts               Basic clip editing requests
     linked-media.ts        Paired placement, link and unlink requests
+    transitions.ts         Transition add/update/remove/list and supported-type catalogue
     advanced-clips.ts      Slip, rolling trim and duplicate requests
     keyframes.ts           Animation requests
     effects.ts             Effect requests
@@ -222,7 +224,7 @@ packages/mcp/src/
   index.ts             Keeps public imports working
 ```
 
-Agents still start `packages/mcp/dist/cli.js`. There are 82 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen.
+Agents still start `packages/mcp/dist/cli.js`. There are 87 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen. `transitions.test.ts` checks transition discovery, edits, locks, history, portable reopen and decoded blended picture/sound.
 
 ## Shared: common definitions
 
@@ -233,6 +235,7 @@ packages/shared/src/
   calculations/timecode.ts  Frame/time calculations
   calculations/animation.ts Animation curves, limits and easing
   calculations/effects.ts   Effect descriptions, controls and pixel calculations
+  calculations/transitions.ts Shared frame intervals, source windows, gains and alpha math
   titles/style.ts           Title and text-style rules
   captions/model.ts         Caption fields and validation
   captions/srt.ts           Reads/writes plain SRT files

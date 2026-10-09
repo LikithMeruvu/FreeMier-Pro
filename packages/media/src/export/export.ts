@@ -1,12 +1,13 @@
 import { clipEnd, timelineDuration, validateProject } from '@freemier/engine';
 import type { Clip, MediaAsset, Project, Track } from '@freemier/shared';
-import { EditorError, effectDescriptor, evaluateTransform, formatSrt, validateTransformValue } from '@freemier/shared';
+import { EditorError, clipRenderWindow, resolveTransition, effectDescriptor, evaluateTransform, formatSrt, validateTransformValue } from '@freemier/shared';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runFfmpeg } from '../providers/ffmpeg/run.js';
 import { animatedTransformFilter, effectFilters } from '../rendering/effects.js';
 import { prepareCaptionLayers, prepareTitleLayers, type TextLayer } from '../rendering/text.js';
+import { appendDissolveLayer, preflightTransitionStreams } from '../rendering/transitions.js';
 
 /**
  * Timeline -> FFmpeg export.
@@ -121,7 +122,7 @@ export function buildExportArgs(
         usedAssets.set(asset.id, idx);
         if (asset.kind === 'image') {
           // Images need a loop + explicit duration or they contribute one frame.
-          inputs.push('-loop', '1', '-t', f(Math.max(clipEnd(clip), clip.duration)), '-i', source);
+          inputs.push('-loop', '1', '-t', f(asset.duration), '-i', source);
         } else {
           inputs.push('-i', source);
         }
@@ -152,8 +153,25 @@ export function buildExportArgs(
   const audioLabels: string[] = [];
   const videoClips = clipRefs.filter((r) => r.asset.kind !== 'audio' && r.track.kind !== 'audio');
   const audioClips = clipRefs.filter((r) => r.asset.hasAudio && r.track.kind !== 'video' && !r.track.muted);
+  const transitions = (timeline.transitions ?? []).map(transition => resolveTransition(timeline, project.media, transition));
+  const appendTrackTransitions = (trackId: string) => {
+    for (const resolved of transitions.filter(item => item.trackId === trackId && item.transition.type === 'dissolve')) {
+      const left = clipRefs.find(ref => ref.clip.id === resolved.left.id)!;
+      const right = clipRefs.find(ref => ref.clip.id === resolved.right.id)!;
+      if (left.track.muted) continue;
+      const label = appendDissolveLayer(filters, { label: `dissolve${vLabel}`, left: resolved.left, right: resolved.right, leftInput: left.inputIndex, rightInput: right.inputIndex, start: resolved.start, end: resolved.end, width, height, fps });
+      const nextCanvas = `base${vLabel + 1}`;
+      filters.push(`[${canvas}][${label}]overlay=x=0:y=0:format=auto:eof_action=pass:enable='gte(t,${f(resolved.start)})*lt(t,${f(resolved.end)})'[${nextCanvas}]`);
+      canvas = nextCanvas; vLabel++;
+    }
+  };
+  let videoTrackId: string | undefined;
 
   for (const ref of videoClips) {
+    if (videoTrackId !== ref.track.id) {
+      if (videoTrackId !== undefined) appendTrackTransitions(videoTrackId);
+      videoTrackId = ref.track.id;
+    }
     if (ref.track.muted) continue;
     const { clip, asset } = ref;
     const start = clip.start;
@@ -183,7 +201,8 @@ export function buildExportArgs(
       chain.push(`scale=iw*${f(scale)}:ih*${f(scale)}`);
     }
     if (!animated && t.rotation.value !== 0) {
-      chain.push(`rotate=${f((t.rotation.value * Math.PI) / 180)}:c=none`);
+      const angle = f((t.rotation.value * Math.PI) / 180);
+      chain.push(`rotate=${angle}:ow=ceil(rotw(${angle})):oh=ceil(roth(${angle})):c=none`);
     }
     // Shift PTS so the clip lands at its timeline position.
     chain.push(`setpts=PTS+${f(start)}/TB`);
@@ -198,7 +217,9 @@ export function buildExportArgs(
 
     const overlayIn = `${out}${vLabel}pre`;
     const nextCanvas = `base${vLabel + 1}`;
-    let overlayChain = `overlay=x=${offsetX}:y=${offsetY}:eof_action=pass:enable='gte(t,${f(start)})*lt(t,${f(end)})'`;
+    const excluded = transitions.filter(item => item.transition.type === 'dissolve' && (item.left.id === clip.id || item.right.id === clip.id))
+      .map(item => `*not(gte(t,${f(item.start)})*lt(t,${f(item.end)}))`).join('');
+    let overlayChain = `overlay=x=${offsetX}:y=${offsetY}:eof_action=pass:enable='gte(t,${f(start)})*lt(t,${f(end)})${excluded}'`;
 
     if (opacity < 1 - 1e-6) {
       // Fade the clip layer via its alpha before compositing.
@@ -210,19 +231,25 @@ export function buildExportArgs(
     canvas = nextCanvas;
     vLabel++;
   }
+  if (videoTrackId !== undefined) appendTrackTransitions(videoTrackId);
 
   for (const ref of audioClips) {
     const { clip } = ref;
-    const delayMs = Math.round(clip.start * 1000);
+    const window = clipRenderWindow(timeline, project.media, clip.id);
+    const delaySamples = Math.round(window.start * 48000);
     const label = `a${aLabel}`;
     const chain = [
-      `atrim=start=${f(clip.sourceIn)}:end=${f(clip.sourceOut)}`,
+      `atrim=start=${f(window.sourceIn)}:end=${f(window.sourceOut)}`,
       // Sample counting avoids unset/nonmonotonic PTS from decoded audio.
       'asetpts=N/SR/TB',
       ...effectFilters(clip.effects, 'audio'),
       `volume=${f(clip.volume)}`,
     ];
-    if (delayMs > 0) chain.push(`adelay=${delayMs}|${delayMs}`);
+    for (const resolved of transitions.filter(item => item.transition.type === 'audio_crossfade' && (item.left.id === clip.id || item.right.id === clip.id))) {
+      chain.push(`afade=t=${resolved.left.id === clip.id ? 'out' : 'in'}:st=${f(resolved.start - window.start)}:d=${f(resolved.end - resolved.start)}:curve=tri`);
+    }
+    chain.push('aresample=48000');
+    if (delaySamples > 0) chain.push(`adelay=${delaySamples}S:all=1`);
     chain.push('asetpts=N/SR/TB');
     filters.push(`[${ref.inputIndex}:a]${chain.join(',')}[${label}]`);
     audioLabels.push(label);
@@ -279,6 +306,7 @@ export function buildExportArgs(
  */
 export async function exportProject(project: Project, opts: ExportOptions): Promise<ExportResult> {
   validateProject(project);
+  await preflightTransitionStreams(project, opts.mediaDirectory);
   const titles = project.timeline.titles ?? [];
   const policy = opts.captionPolicy ?? 'burn-in';
   const captionTrack = project.timeline.captions;

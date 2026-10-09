@@ -6,7 +6,7 @@ import {
   PROJECT_SCHEMA_VERSION,
   TRANSFORM_LIMITS,
   validateCaptions,
-  validateEffectParams, validateMarkers, validateTitles
+  validateEffectParams, validateMarkers, validateTitles, validateTransitions
 } from '@freemier/shared';
 import path from 'node:path';
 import { validateEffectPresetLibrary } from '../presets/operations.js';
@@ -205,6 +205,7 @@ export function validateProject(value: unknown, source = '<memory>'): Project {
   if (timeline.markers !== undefined) extension('timeline.markers', () => validateMarkers(timeline.markers, fps));
   if (timeline.titles !== undefined) extension('timeline.titles', () => validateTitles(timeline.titles, fps));
   if (timeline.captions !== undefined) extension('timeline.captions', () => validateCaptions(timeline.captions));
+  if (timeline.transitions !== undefined) extension('timeline.transitions', () => { validateTransitions(timeline as unknown as import('@freemier/shared').Timeline, [...media.values()]); });
   if (p.effectPresets !== undefined) extension('effectPresets', () => validateEffectPresetLibrary(p.effectPresets));
   return value as Project;
 }

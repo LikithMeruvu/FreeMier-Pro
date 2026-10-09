@@ -18,3 +18,4 @@ export * from './timeline/operations.js';
 export * from './timeline/queries.js';
 export * from './timeline/tracks.js';
 export * from './titles/operations.js';
+export * from './transitions/operations.js';

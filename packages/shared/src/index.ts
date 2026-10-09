@@ -1,6 +1,7 @@
 export * from './calculations/animation.js';
 export * from './calculations/effects.js';
 export * from './calculations/timecode.js';
+export * from './calculations/transitions.js';
 export * from './captions/model.js';
 export * from './captions/srt.js';
 export * from './errors/index.js';
