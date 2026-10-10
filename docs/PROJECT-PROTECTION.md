@@ -1,6 +1,6 @@
 # Project protection
 
-This area is implemented and Windows-verified: engine, service, standard-MCP and actual-Electron checks pass, including real Save/failure/crash/close scenarios. Exact-commit Linux CI runs on publication; see the [completion tracker](FEATURE-COMPLETION.md).
+This area is implemented and accepted: engine, service, standard-MCP and actual-Electron checks pass on Windows, including real Save/failure/crash/close scenarios, and the exact implementation commit passed [Linux CI](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/38068512122) with all 413 tests and all eight desktop suites. See the [completion tracker](FEATURE-COMPLETION.md).
 
 The editor compares the current project with the content that actually finished saving. Undoing back to that content clears the unsaved flag. Saving while an agent makes another edit saves the captured version; the newer edit stays unsaved. A new unchanged project has no saved file until you choose Save.
 
