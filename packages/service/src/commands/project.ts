@@ -32,7 +32,7 @@ export const PROJECT_COMMANDS: CommandDefinition[] = [
   {
     name: 'project_create',
     title: 'Create project',
-    description: 'Replace the current project with a new empty one. Discards the current timeline.',
+    description: 'Legacy destructive replacement: create a new empty project and discard the current timeline without checking unsaved edits. Prefer project_replace with the current protection token for guarded replacement.',
     inputSchema: {
       name: z.string().optional().describe('Project name'),
       fps: z.number().positive().optional().describe('Frame rate, default 30'),
@@ -80,14 +80,14 @@ export const PROJECT_COMMANDS: CommandDefinition[] = [
   {
     name: 'project_save',
     title: 'Save project',
-    description: 'Save the current project and copied media to disk. Defaults to <workspace>/project.freemier. Legacy .palmier paths are supported.',
+    description: 'Publish the captured project snapshot and verified copied media. Returns a save receipt and protection state; edits made during I/O remain unsaved. Defaults to <workspace>/project.freemier. Legacy .palmier paths are supported.',
     inputSchema: { path: z.string().optional().describe('Destination project directory') },
     handler: saveOwnedProject,
   },
   {
     name: 'project_load',
     title: 'Load project',
-    description: 'Load a .freemier or legacy .palmier project into the owning store.',
+    description: 'Legacy destructive replacement: load a .freemier or .palmier project without an unsaved-work guard. Prefer project_replace with the current protection token for guarded loading.',
     inputSchema: { path: z.string().describe('Path to the project directory') },
     handler: loadOwnedProject,
   }

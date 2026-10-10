@@ -9,18 +9,18 @@ This tracker follows the same 27 product areas throughout development. Developme
 - **Done** means development is Implemented and acceptance is Accepted. Do not infer acceptance from legacy checks or from a narrower existing capability.
 - Record reviewable checks in the acceptance evidence section before marking an area accepted.
 
-## Current summary — 9 October 2026
+## Current summary — 10 October 2026
 
 | Measure | Count |
 | --- | ---: |
 | Done | 5 / 27 |
 | Incomplete | 22 / 27 |
-| In development | 1 |
+| In development | 0 |
 | Not started | 21 |
-| Implemented, waiting for acceptance | 0 |
+| Implemented, waiting for acceptance | 1 |
 | Without final acceptance | 22 |
 
-The current suite passes 377 tests in 30 files, the 40 baseline Electron checks, the standalone font check, the project/track suite, 10 linked-media checks and the media organisation, transition and workspace-settings Electron workflows on Windows. Build, all tests and all seven desktop suites also passed [Linux CI on the workspace-settings implementation](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37952642166). The preceding transition milestone passed [its verified Linux repair](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37946475018), including independent audio-clip decoding. Existing regression checks do not establish acceptance for the other 22 areas. Project protection is now in development.
+The current suite passes 413 tests in 34 files, the 40 baseline Electron checks, the standalone font check, the project/track suite, 10 linked-media checks and the media organisation, transition, workspace-settings and project-protection Electron workflows on Windows. Project protection is implemented and Windows-verified; its exact-commit Linux CI runs on publication. The preceding workspace-settings milestone passed [Linux CI on its implementation](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37952642166). Existing regression checks do not establish acceptance for the other 21 areas.
 
 ## Fixed area tracker
 
@@ -49,7 +49,7 @@ The current suite passes 377 tests in 30 files, the 40 baseline Electron checks,
 | 21 | Scopes | Not started | Not accepted | Provide relevant video and audio scopes that update from the actual project signal and remain consistent with preview/export. |
 | 22 | Workspace settings | Implemented | Accepted | Windows/Linux checks pass for persistent preferences and named layouts, visible panel sizes/visibility, independent project history, service reconnect, app restart and backed-up settings recovery. Floating panels, vendor layout import and custom keyboard mappings are unsupported extensions. See [support](WORKSPACE-SETTINGS.md). |
 | 23 | Missing GUI controls | Implemented | Accepted | Visible New Project/settings and track rename/reorder/remove verified with refusal, undo and persistence. FPS changes on authored timelines are explicitly refused until conversion exists. |
-| 24 | Project protection | In development | Not accepted | Provide autosave, crash recovery, and unsaved-close protection; verify recovery and project integrity through real save, reopen, crash, and close scenarios. |
+| 24 | Project protection | Implemented | Not accepted | Autosave, content-based saved state, immutable verified recovery versions, guarded replacement and unsaved-close protection pass shared engine/service, standard MCP, actual GUI, decode and real Save/reopen/failure scenarios on Windows; exact-commit Linux CI runs on publication. Forced termination cannot prompt; cloud backup and cross-process writer locking remain unsupported extensions. See [project protection](PROJECT-PROTECTION.md). |
 | 25 | Safe export | Not started | Not accepted | Protect existing outputs from accidental overwrite, export through temporary output with safe publication, and handle cancellation or interruption with safe recovery. Verify playable output, failure handling, and source-project integrity. |
 | 26 | Desktop delivery | Not started | Not accepted | Produce and verify installable Windows and Linux releases, including launch, required media/runtime dependencies, and clean-machine installation/update checks. |
 | 27 | Session protection | Not started | Not accepted | Enforce owning workspace/session identity and authentication; validate bridge requests, check privileged IPC senders, restrict navigation, and test refusal of cross-session access. |

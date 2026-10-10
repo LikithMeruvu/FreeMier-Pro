@@ -49,10 +49,13 @@ try {
   await waitFor(async () => (await call('project_info')).name === 'Electron Project');
   assert.equal((await call('project_info')).width, previous.width);
   assert.equal((await call('marker_list')).markers[0].label, 'Keep content');
-  await evaluate('window.__confirmCalls=[];window.confirm=(message)=>{window.__confirmCalls.push(message);return false}');
+  await evaluate('window.__confirmCalls=[]');
+  await call('marker_add', { label: 'Unsaved guard', time: 1 });
   await click('#btn-new-project');
-  assert.ok((await evaluate('window.__confirmCalls.at(-1)')).includes('discard the current project'));
-  assert.equal(await evaluate('document.querySelector("#project-dialog").open'), false); assert.equal((await call('marker_list')).markers[0].label, 'Keep content');
+  await waitFor(() => evaluate('document.querySelector("#protection-replace-dialog").open'));
+  await click('#protection-replace-cancel');
+  await waitFor(() => evaluate('!document.querySelector("#protection-replace-dialog").open'));
+  assert.equal(await evaluate('document.querySelector("#project-dialog").open'), false); assert.equal((await call('marker_list')).markers[0].label, 'Keep content'); assert.equal((await call('marker_list')).markers.length, 2);
   const first = (await call('track_add', { kind: 'video', name: 'V2' })).track, second = (await call('track_add', { kind: 'video', name: 'V3' })).track;
   await waitFor(() => evaluate(`!!document.querySelector('[data-track-id="${second.id}"]')`));
   await click(`[data-track-id="${second.id}"] [title="Move V3 down"]`);

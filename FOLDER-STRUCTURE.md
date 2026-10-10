@@ -80,6 +80,7 @@ packages/gui/
       scopes/           Reserved: colour/audio measurements
       plugins/          Reserved: installed plugin controls
       settings/settings.js  Preferences and saved panel layouts
+      recovery/protection.js Unsaved status, autosave controls and recovery versions
   test/acceptance/    Checks that open and operate the real Electron app
 ```
 
@@ -126,13 +127,15 @@ packages/engine/src/
   color/            Reserved: grading, LUT and colour-management rules
   resources/        Reserved: imported fonts, LUTs and template references
   analysis/         Reserved: tracking, stabilisation and AI result application
-  recovery/         Reserved: autosave and recovery rules
+  recovery/protection.ts Content-based saved status, monotonic tokens and save receipts
   index.ts          Shares the working engine functions
 ```
 
 Current colour changes are built-in effects, so their rules live in `effects/operations.ts`. Layered clips already work through tracks. Reserved folders will own richer behaviour when developed. `audio/operations.ts` is not a complete mixer. Animated text still needs editing rules, rendering, controls and tests. Transitions have a bounded dissolve/crossfade implementation; see [transition support](docs/TRANSITIONS.md) for its limits and acceptance state.
 
 Put feature checks in `packages/engine/test/<feature>/`. `test/integration/` checks edits involving several features together.
+
+`test/recovery/` checks saved-content equality through undo/redo, save receipts during edits, replacement tokens and project JSON publication. Actual Electron acceptance covers guarded New/Open, recovery inspection/restore, native Save/Discard/Cancel, canceled and failed Saves and a concurrent edit during atomic publication.
 
 `test/linked-media/` covers paired edits, rollback, locks, ripple propagation and saved links. `test/project/settings.test.ts` covers project settings and track ordering. Electron checks in `gui/test/acceptance/linked-media.mjs` and `project-tracks.mjs` exercise the actual visible controls. Linked editing currently supports one aligned video/audio pair, not offset or multiple-audio groups.
 
@@ -187,6 +190,7 @@ packages/service/src/
     effects.ts             Effect requests
     capabilities.ts        Current effect/control descriptions
     workspace.ts           User preferences and named panel-layout requests
+    protection.ts          Autosave/recovery and guarded project replacement requests
     export.ts              Export and export-plan requests
     markers.ts             Marker requests
     titles.ts              Title requests
@@ -196,6 +200,7 @@ packages/service/src/
   connection/bridge.ts     Live updates, GUI commands and media routes
   persistence/projects.ts  Packages copied media on save and opens projects
   settings/workspace.ts    Owns user preferences, atomic saves and recovery backups
+  recovery/protection.ts   Owns autosave configuration and immutable recovery packages
   jobs/export.ts           Coordinates native exports and progress
   library/relink.ts        Verify replacement files and switch one asset location atomically
   library/import/presets.ts Reads bounded portable effect-preset files
@@ -226,7 +231,7 @@ packages/mcp/src/
   index.ts             Keeps public imports working
 ```
 
-Agents still start `packages/mcp/dist/cli.js`. There are 94 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen. `transitions.test.ts` checks transition discovery, edits, locks, history, portable reopen and decoded blended picture/sound. `workspace-settings.test.ts` checks user layouts, independent history, restart and backed-up recovery.
+Agents still start `packages/mcp/dist/cli.js`. There are 102 tools. Commands do not need to be implemented twice. Tests in `test/stdio/` start the real MCP process; `linked-media.test.ts` uses the standard SDK and decodes exported picture/sound after paired edits and save/reopen. `media-organisation.test.ts` checks bins/search/history, identity, multiple replacement candidates and decoded linked picture/sound after relink and portable reopen. `transitions.test.ts` checks transition discovery, edits, locks, history, portable reopen and decoded blended picture/sound. `workspace-settings.test.ts` checks user layouts, independent history, restart and backed-up recovery. `project-protection.test.ts` checks the eight protection commands end to end, and `lifecycle.test.ts` checks real owner shutdown on harness EOF.
 
 ## Shared: common definitions
 
@@ -265,6 +270,7 @@ Program code and a user's imported files are different things. Importing a prese
 | Portable project resources | Planned `resources/` inside saved projects for fonts, LUTs and templates; the current schema has no general resource bundle. |
 | Cache | Workspace `cache/` for rebuildable thumbnails, waveforms and text images. |
 | Workspace preferences | Workspace `settings/workspace.json` stores the current panel layout and named layouts, separately from projects. Invalid settings remain untouched until explicit backed-up recovery. |
+| Project protection | Workspace `settings/project-protection.json` stores autosave preferences; `recovery/<version ID>/` holds immutable `project.json`, `manifest.json` and verified copied `media/`. These are user data outside Git. |
 
 The personal library is part of the final product scope now. Its planned categories are:
 

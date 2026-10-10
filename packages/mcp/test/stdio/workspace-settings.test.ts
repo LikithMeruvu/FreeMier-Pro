@@ -34,7 +34,7 @@ afterEach(async () => {
 describe('workspace preferences through a standard MCP client', () => {
   it('discovers seven descriptive commands and refuses invalid or stale settings without editing the project', async () => {
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(94);
+    expect(tools).toHaveLength(102);
     const capabilities = (await call('editor_capabilities')).workspaceSettings;
     expect(capabilities.commands).toHaveLength(7);
     for (const name of capabilities.commands) {

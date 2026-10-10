@@ -10,6 +10,7 @@ export type { AddLinkedClipOptions, LinkedClipPair } from './linked-media/operat
 export * from './markers/operations.js';
 export * from './motion/operations.js';
 export * from './presets/operations.js';
+export * from './recovery/protection.js';
 export * from './project/persistence.js';
 export * from './project/settings.js';
 export * from './project/store.js';

@@ -14,6 +14,7 @@ import { registerPanelsTimelineTimeline } from '../panels/timeline/timeline.js';
 import { registerPanelsTitlesTitles } from '../panels/titles/titles.js';
 import { registerPanelsTransitionsTransitions } from '../panels/transitions/transitions.js';
 import { registerPanelsSettings } from '../panels/settings/settings.js';
+import { registerProjectProtection } from '../panels/recovery/protection.js';
 import '../styles/app.css';
 import { registerWorkspaceProjects } from '../workspace/projects.js';
 import { registerWorkspaceTransport } from '../workspace/transport.js';
@@ -26,6 +27,7 @@ import { registerKeyframeControls } from '../panels/keyframes/keyframes.js';
 
 const ui = createViewState();
 registerPanelsSettings(ui);
+registerProjectProtection(ui);
 registerComponentsControls(ui);
 registerConnectionClient(ui);
 registerWorkspaceTransport(ui);

@@ -18,4 +18,4 @@ The same validator guards project creation, store construction/load/candidate mu
 
 ## Remaining reliability work
 
-Structural validation does not provide autosave/recovery, concurrent-owner protection, media integrity/relinking, export overwrite/cancel protection or a hardened desktop session. Validation traverses the candidate snapshot; large-project performance needs dedicated trials. See [release readiness](RELEASE-READINESS.md).
+Structural validation does not provide concurrent-owner protection, export overwrite/cancel protection or a hardened desktop session. Autosave/recovery protection and explicit verified relinking are separate, verified behaviours ([project protection](PROJECT-PROTECTION.md), [media organisation](MEDIA-ORGANISATION.md)). Validation traverses the candidate snapshot; large-project performance needs dedicated trials. See [release readiness](RELEASE-READINESS.md).

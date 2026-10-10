@@ -3,12 +3,15 @@ import { textRasterPayload } from '@freemier/shared/text';
 export function registerConnectionClient(ui) {
   async function command(action, args = {}) {
     try {
-      const result = await (await fetch(ui.BRIDGE + '/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...args }) })).json();
+      const result = await (await fetch(ui.BRIDGE + '/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, arguments: args }) })).json();
       if (!result.ok)
         throw new Error(result.error?.message ?? 'Command failed');
       const workspaceSettings = result.workspaceSettings ?? result.data?.workspaceSettings ?? result._bridge?.workspaceSettings ?? result.data?._bridge?.workspaceSettings;
       if (workspaceSettings)
         ui.receiveWorkspaceSettings?.(workspaceSettings, false);
+      const projectProtection = result.projectProtection ?? result.data?.projectProtection ?? result._bridge?.projectProtection ?? result.data?._bridge?.projectProtection;
+      if (projectProtection)
+        ui.receiveProjectProtection?.(projectProtection, false, result.eventEpoch ?? result.data?.eventEpoch ?? result._bridge?.eventEpoch ?? result.data?._bridge?.eventEpoch);
       if (result._bridge)
         ui.applyState(result._bridge.project, result._bridge.revision, result._bridge);
       return result;
@@ -19,16 +22,17 @@ export function registerConnectionClient(ui) {
     }
   }
 
-  function applyState(next, nextRevision, history = {}) {
-    if (!next?.timeline)
-      return;
+  function applyState(next, nextRevision, history = {}, { protectionAuthority = false } = {}) {
     ui.receiveWorkspaceSettings?.(history.workspaceSettings, false);
+    ui.receiveProjectProtection?.(history.projectProtection, protectionAuthority, history.eventEpoch);
     if (history.eventEpoch !== undefined && history.eventSequence !== undefined) {
       if (ui.eventEpoch === history.eventEpoch && history.eventSequence <= ui.eventSequence && ui.project)
         return;
       ui.eventEpoch = history.eventEpoch;
       ui.eventSequence = history.eventSequence;
     }
+    if (!next?.timeline)
+      return;
     const previous = ui.project;
     const replace = previous?.id !== next.id;
     const changedMedia = new Set((previous?.media ?? []).filter((asset) => {
@@ -116,6 +120,7 @@ export function registerConnectionClient(ui) {
       ui.$('live-status').className = 'live-status on'; ui.$('live-text').textContent = 'Live MCP';
       void fetch(ui.BRIDGE + '/state').then((response) => response.json()).then((state) => {
         if (generation === reconnectGeneration) ui.receiveWorkspaceSettings?.(state.workspaceSettings, true);
+        if (generation === reconnectGeneration) ui.receiveProjectProtection?.(state.projectProtection, true, state.eventEpoch);
       }).catch(() => {});
     };
     source.onerror = () => { ui.$('live-status').className = 'live-status off'; ui.$('live-text').textContent = 'Reconnecting'; };
@@ -130,9 +135,12 @@ export function registerConnectionClient(ui) {
       // SSE is ordered. Undo restores an earlier snapshot revision and must repaint.
       if (event.type === 'snapshot' || event.type === 'change') {
         ui.receiveWorkspaceSettings?.(event.state?.workspaceSettings, event.type === 'snapshot');
-        ui.applyState(event.state.project ?? event.state, event.revision, event.state);
+        if (event.type === 'snapshot') ui.receiveProjectProtection?.(event.state?.projectProtection, true, event.state?.eventEpoch);
+        ui.applyState(event.state.project ?? event.state, event.revision, event.state, { protectionAuthority: event.type === 'snapshot' });
       } else if (event.type === 'workspace-settings')
         ui.receiveWorkspaceSettings?.(event.workspaceSettings, false);
+      else if (event.type === 'project-protection')
+        ui.receiveProjectProtection?.(event.projectProtection, false, event.eventEpoch);
       else if (event.type === 'export-progress')
         ui.showProgress(event.fraction);
     };

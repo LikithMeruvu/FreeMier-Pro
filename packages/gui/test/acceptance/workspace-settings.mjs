@@ -289,6 +289,7 @@ try {
   call = await startService();
   await waitFor('service read-only corrupt settings state', async () => (await call('workspace_settings_get')).workspaceSettings.readOnly);
   const recoveryGui = await startGui();
+  await waitFor('recovery renderer connected before visible settings actions', () => recoveryGui.evaluate(`document.querySelector('#live-status').classList.contains('on')`));
   await recoveryGui.click('#btn-workspace-settings');
   await waitFor('corrupt settings warning visible and Recovery enabled', () => recoveryGui.evaluate(`(()=>{const warning=document.querySelector('#ws-persistence-warning');return warning.hidden===false&&warning.textContent.toLowerCase().includes('read-only')&&!document.querySelector('#ws-restore').disabled})()`));
   await recoveryGui.click('#ws-restore');

@@ -20,6 +20,9 @@ const api = {
   reportState: (snapshot) => ipcRenderer.send('renderer:state', snapshot),
   onCheckState: (cb) => ipcRenderer.on('renderer:check', () => cb()),
 };
-if (process.env.FREEMIER_TEST_MODE === '1') api.captureForTest = () => ipcRenderer.invoke('test:capture-page');
+if (process.env.FREEMIER_TEST_MODE === '1') {
+  api.captureForTest = () => ipcRenderer.invoke('test:capture-page');
+  api.requestWindowCloseForTest = () => ipcRenderer.invoke('test:request-window-close');
+}
 contextBridge.exposeInMainWorld('freemier', api);
 contextBridge.exposeInMainWorld('palmier', api); // Existing client compatibility.

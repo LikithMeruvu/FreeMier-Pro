@@ -139,9 +139,9 @@ describe('MCP protocol', () => {
     expect((await client.call('undo')).undone).toBe(true); expect((await client.call('marker_list')).markers).toEqual([]);
     expect((await client.call('redo')).redone).toBe(true); expect((await client.call('marker_list')).markers).toMatchObject([{ id: marker.id }]);
   });
-  it('initializes and lists all 94 tools with schemas', async () => {
+  it('initializes and lists all 102 tools with schemas', async () => {
     const tools = await client.listTools();
-    expect(tools.length).toBe(94);
+    expect(tools.length).toBe(102);
     for (const t of tools) {
       expect(t.name).toMatch(/^[a-z_]+$/);
       expect(t.description.length).toBeGreaterThan(10);

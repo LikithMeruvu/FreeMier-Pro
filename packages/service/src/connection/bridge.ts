@@ -10,6 +10,7 @@ import { COMMANDS as TOOLS } from '../commands/registry.js';
 import { exportSession } from '../jobs/export.js';
 import { resolveMediaPath } from '../commands/helpers.js';
 import { getWorkspaceSettingsOwner, type WorkspaceSettingsOwner } from '../settings/workspace.js';
+import { getProjectProtectionOwner, type ProjectProtectionOwner } from '../recovery/protection.js';
 
 /**
  * Live-sync bridge.
@@ -31,6 +32,7 @@ export interface BridgeOptions {
   /** Directory used for thumbnails, waveforms, and exports. */
   workspace: string;
   workspaceSettings?: WorkspaceSettingsOwner;
+  projectProtection?: ProjectProtectionOwner;
 }
 
 interface SseClient {
@@ -42,12 +44,14 @@ export class LiveBridge {
   readonly #store: EditorStore;
   readonly #workspace: string;
   readonly #workspaceSettings: WorkspaceSettingsOwner;
+  readonly #projectProtection: ProjectProtectionOwner;
   readonly #clients = new Set<SseClient>();
   #server: HttpServer | null = null;
   #nextClientId = 1;
   #port: number;
   #unsubscribe: (() => void) | null = null;
   #unsubscribeSettings: (() => void) | null = null;
+  #unsubscribeProtection: (() => void) | null = null;
   #thumbnails = new Map<string, Promise<string>>();
   #waveforms = new Map<string, Promise<number[]>>();
   #mediaLocations = new Map<string, string>();
@@ -59,6 +63,7 @@ export class LiveBridge {
     this.#store = opts.store;
     this.#workspace = opts.workspace;
     this.#workspaceSettings = opts.workspaceSettings ?? getWorkspaceSettingsOwner(opts.workspace);
+    this.#projectProtection = opts.projectProtection ?? getProjectProtectionOwner(opts.store, opts.workspace);
     this.#port = opts.port ?? 4317;
     for (const asset of opts.store.project.media) this.#mediaLocations.set(asset.id, `${asset.copied}:${asset.path}`);
   }
@@ -74,6 +79,7 @@ export class LiveBridge {
   /** Start listening. Resolves once bound. Pass port 0 for an ephemeral port. */
   async start(): Promise<number> {
     await this.#workspaceSettings.ready;
+    await this.#projectProtection.ready;
     const server = createServer((req, res) => this.#handle(req, res));
     this.#server = server;
 
@@ -90,11 +96,14 @@ export class LiveBridge {
         revision: event.revision,
         kind: event.kind,
         ids: event.ids,
-        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch, workspaceSettings: this.#workspaceSettings.snapshot() },
+        state: { ...event.state, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch, workspaceSettings: this.#workspaceSettings.snapshot(), projectProtection: this.#projectProtection.snapshot() },
       });
     });
     this.#unsubscribeSettings = this.#workspaceSettings.subscribe(workspaceSettings => {
       this.#broadcast({ type: 'workspace-settings', workspaceSettings });
+    });
+    this.#unsubscribeProtection = this.#projectProtection.subscribe(projectProtection => {
+      this.#broadcast({ type: 'project-protection', eventEpoch: this.#eventEpoch, projectProtection });
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -112,6 +121,8 @@ export class LiveBridge {
     this.#unsubscribe = null;
     this.#unsubscribeSettings?.();
     this.#unsubscribeSettings = null;
+    this.#unsubscribeProtection?.();
+    this.#unsubscribeProtection = null;
     for (const client of this.#clients) {
       try { client.res.end(); } catch { /* already closed */ }
     }
@@ -144,7 +155,7 @@ export class LiveBridge {
   }
 
   #snapshot() {
-    return { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch, workspaceSettings: this.#workspaceSettings.snapshot() };
+    return { project: this.#store.project, revision: this.#store.revision, canUndo: this.#store.canUndo, canRedo: this.#store.canRedo, eventSequence: this.#eventSequence, eventEpoch: this.#eventEpoch, workspaceSettings: this.#workspaceSettings.snapshot(), projectProtection: this.#projectProtection.snapshot() };
   }
 
   /** Read and parse a JSON request body, bounded to 1 MB. */
@@ -177,9 +188,17 @@ export class LiveBridge {
       const action = aliases[String(body.action ?? '')] ?? String(body.action ?? '');
       const tool = TOOLS.find((t) => t.name === action);
       if (!tool || action === 'export_video') throw new EditorError('INVALID_ARGUMENT', 'Unknown bridge command', { action });
-      const parsed = z.object(tool.inputSchema).safeParse(body);
+      // Arguments can themselves contain an "action" field. Keep the command
+      // selector separate while retaining existing flat requests for callers.
+      let argumentsValue: unknown = body;
+      if (Object.hasOwn(body, 'arguments')) {
+        if (Object.keys(body).some(key => key !== 'action' && key !== 'arguments') || !body.arguments || typeof body.arguments !== 'object' || Array.isArray(body.arguments))
+          throw new EditorError('INVALID_ARGUMENT', 'Nested commands require only action and an arguments object');
+        argumentsValue = body.arguments;
+      }
+      const parsed = z.object(tool.inputSchema).safeParse(argumentsValue);
       if (!parsed.success) throw new EditorError('INVALID_ARGUMENT', 'Invalid command arguments', { issues: parsed.error.issues });
-      const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, workspaceSettings: this.#workspaceSettings, notify: () => { } });
+      const result = await tool.handler(parsed.data, { store: this.#store, workspace: this.#workspace, workspaceSettings: this.#workspaceSettings, projectProtection: this.#projectProtection, notify: () => { } });
       if (typeof result !== 'object' || result === null || Array.isArray(result)) throw new EditorError('INTERNAL', 'Bridge tool must return an object');
       this.#json(res, 200, { ...result, _bridge: this.#snapshot() });
     } catch (err) {

@@ -44,7 +44,7 @@ export interface ServerOptions {
 }
 
 export function createServer(options: ServerOptions = {}) {
-  const { store, context } = createSession(options);
+  const { store, context, dispose } = createSession(options);
 
   const server = new Server(
     { name: 'freemier-pro', version: '0.1.0' },
@@ -56,33 +56,62 @@ export function createServer(options: ServerOptions = {}) {
 
   server.setRequestHandler(CallToolRequestSchema, request => callTool(request, context));
 
-  return { server, store, context };
+  // Closing a borrowed adapter must not dispose another owner's editing session.
+  server.onclose = () => { if (!options.store) dispose(); };
+  return { server, store, context, dispose };
 }
 
 /** Start the server on stdio, optionally hosting the GUI's live bridge. */
-export async function startStdio(options: ServerOptions = {}): Promise<{ port: number | null }> {
+export async function startStdio(options: ServerOptions = {}): Promise<{ port: number | null; dispose: () => Promise<void> }> {
   const { mkdir } = await import('node:fs/promises');
   await mkdir(options.workspace ?? path.join(os.homedir(), '.freemier'), { recursive: true });
-  const { server, store, context } = createServer(options);
+  const { server, store, context, dispose } = createServer(options);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
   let port: number | null = null;
+  let bridge: import('@freemier/service').LiveBridge | undefined;
+  let bridgeStart: Promise<number> | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = Promise.resolve().then(async () => {
+      process.off('SIGINT', signalShutdown);
+      process.off('SIGTERM', signalShutdown);
+      process.stdin.off('end', signalShutdown);
+      process.stdin.off('close', signalShutdown);
+      if (!options.store) dispose();
+      // EOF can arrive while preferences are loading and before listen binds.
+      // Settle that startup before stopping its server, so it cannot bind later.
+      await bridgeStart?.catch(() => undefined);
+      await Promise.all([bridge?.stop(), server.close()]);
+    });
+    return shutdownPromise;
+  };
+  const signalShutdown = () => {
+    void shutdown().catch(error => process.stderr.write(`[freemier-pro] shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`));
+  };
+  const closed = server.onclose;
+  server.onclose = () => { closed?.(); signalShutdown(); };
+  process.on('SIGINT', signalShutdown);
+  process.on('SIGTERM', signalShutdown);
+  process.stdin.once('end', signalShutdown);
+  process.stdin.once('close', signalShutdown);
   if (typeof options.bridgePort === 'number') {
     const { LiveBridge } = await import('@freemier/service');
-    const bridge = new LiveBridge({
+    bridge = new LiveBridge({
       store,
       port: options.bridgePort,
       workspace: context.workspace,
     });
-    port = await bridge.start();
+    bridgeStart = bridge.start();
+    try { port = await bridgeStart; }
+    catch (error) { await shutdown(); throw error; }
+    if (shutdownPromise) { await shutdownPromise; return { port: null, dispose: shutdown }; }
     process.stderr.write(`[freemier-pro] live bridge on http://127.0.0.1:${port}\n`);
 
-    const shutdown = () => { void bridge.stop(); };
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
   }
 
   process.stderr.write('[freemier-pro] ready on stdio\n');
-  return { port };
+  return { port, dispose: shutdown };
 }

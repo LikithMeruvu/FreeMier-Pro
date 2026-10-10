@@ -1,6 +1,7 @@
 import type { EditorStore } from '@freemier/engine';
 import { z } from 'zod';
 import type { WorkspaceSettingsOwner } from '../settings/workspace.js';
+import type { ProjectProtectionOwner } from '../recovery/protection.js';
 
 export interface CommandContext {
   store: EditorStore;
@@ -10,6 +11,7 @@ export interface CommandContext {
   workspace: string;
   /** Shared service-owned preferences, independent of the editable project. */
   workspaceSettings?: WorkspaceSettingsOwner;
+  projectProtection?: ProjectProtectionOwner;
 }
 
 export interface CommandDefinition {

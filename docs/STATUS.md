@@ -1,6 +1,6 @@
 # Current support
 
-Updated 9 October 2026. FreeMier Pro is a **developer source preview**, not a production-ready desktop editor.
+Updated 10 October 2026. FreeMier Pro is a **developer source preview**, not a production-ready desktop editor.
 
 ## Available features
 
@@ -18,12 +18,13 @@ Updated 9 October 2026. FreeMier Pro is a **developer source preview**, not a pr
 | Captions | One editable plain SRT track; import/export, timing and style; burn-in, no captions or SRT sidecar |
 | Presets | Descriptive portable `.fmfx.json` effect stacks; inspect, import, search, apply, capture, export and remove |
 | Workspace | Persistent panel visibility/sizes, Edit/Color/Audio mode, browser tab, zoom/snap/grid, and named layout save/apply/delete; independent of project history |
-| MCP and GUI | 94 standard MCP tools; desktop controls and agents share one owning project store; changes appear live |
+| Protection | Content-based saved state; autosave defaults to 60 s while unsaved with 10 retained completed recovery versions (10–3600 s, 1–50 configurable); immutable recovery packages with verified copied media; explicit checkpoint/list/inspect/restore/delete; guarded New/Open replacement; standalone Save/Discard/Cancel close |
+| MCP and GUI | 102 standard MCP tools; desktop controls and agents share one owning project store; changes appear live |
 | Output | CPU FFmpeg export, including H.264/HEVC when the required encoder is installed |
 
 ## Checks
 
-The suite includes **377 tests in 30 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite, **10 linked-media Electron checks**, and media organisation, transition and workspace-settings desktop workflows. These all passed on Windows on 9 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
+The suite includes **413 tests in 34 files**, **40 baseline live Electron checks**, **one standalone font check**, a project/track-control desktop suite, **10 linked-media Electron checks**, and media organisation, transition, workspace-settings and project-protection desktop workflows. These all passed on Windows on 10 October. Tests use generated media, fully decoded video/audio, a real standard MCP connection, desktop controls, saved projects and actual exports. Test files run sequentially to bound concurrent FFmpeg encoder workloads.
 
 The preceding linked-media/project-control milestone passed Windows checks and [Linux CI](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37807515970). Media organisation adds ten commands and one optional `binId` field to `media_import`; existing names and other original inputs remain compatible. This new milestone also passed [Linux CI on its exact implementation commit](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37812909590), including build, tests and actual Electron/Xvfb acceptance. Planned folders are documented rather than counted as completed features. See the [folder map](../FOLDER-STRUCTURE.md) and [27-area tracker](FEATURE-COMPLETION.md).
 
@@ -44,7 +45,8 @@ The transition milestone adds five commands without changing the previous 82 inp
 - Dissolves require matching constant source/sequence video rates and static participant transforms without enabled fades. Mixed/variable-rate dissolves, wipes, transition assets and plugins remain unsupported.
 - Nested sequences, proxies, multicam, interchange, advanced grading/mixing, local AI and GPU rendering remain planned.
 - Workspace settings have seven standard commands and persist separately from projects. Actual Electron checks cover remote changes, responsive panel sizes, named layouts, live service reconnect, app restart and backed-up recovery of invalid settings. Build, all 377 tests and all seven desktop suites also pass in [exact implementation Linux CI](https://github.com/LikithMeruvu/FreeMier-Pro/actions/runs/37952642166). See [workspace settings](WORKSPACE-SETTINGS.md).
+- Project protection covers completed immutable recovery generations, not an unfinished write or every possible power failure; forced termination cannot display a close prompt, and cloud backup or separate-process writer locking is unsupported. Existing `project_create`/`project_load` keep their explicitly destructive replacement behavior. See [project protection](PROJECT-PROTECTION.md).
 - Source/transport selection remains local presentation state. Additional MCP presentation controls and exact composited image output are planned.
-- Installation packages, recovery/autosave, export overwrite/cancel protection, desktop session hardening and sustained real-footage/performance trials remain open.
+- Installation packages, export overwrite/cancel protection, desktop session hardening and sustained real-footage/performance trials remain open.
 
 See [preset details](PRESETS.md), the [development roadmap](../ROADMAP.md) and [release requirements](RELEASE-READINESS.md).

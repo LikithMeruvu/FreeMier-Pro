@@ -118,7 +118,10 @@ try {
   check('GUI trim, slip, rolling trim and duplicate keep picture/sound paired and undo together');
   await click('#btn-save'); await waitFor('GUI portable save', async () => JSON.parse(await fs.readFile(path.join(saved, 'project.json'), 'utf8')).timeline.clipLinks.length === 2);
   await call('clip_remove', { clipId: second.audioClipId });
-  await click('#btn-open'); await waitFor('GUI reopen', async () => (await pairs()).length === 2);
+  await click('#btn-open');
+  await waitFor('guarded replacement prompt', () => evaluate(`document.querySelector('#protection-replace-dialog')?.open===true`));
+  await evaluate(`document.querySelector('#protection-replace-discard').click()`);
+  await waitFor('GUI reopen', async () => (await pairs()).length === 2);
   assert.equal((await call('media_waveform', { assetId: asset.id })).peaks.length > 0, true);
   const waveform = await fetch(bridge + '/waveform', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: asset.id }) }).then((response) => response.json());
   assert.equal(waveform.ok, true); assert.ok(waveform.peaks.some((peak) => peak > 0));

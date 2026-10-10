@@ -68,7 +68,7 @@ try {
   const env = { ...process.env, FREEMIER_WORKSPACE: workspace, FREEMIER_BRIDGE_PORT: String(port), FREEMIER_TEST_MODE: '1', FREEMIER_TEST_DIALOGS: JSON.stringify({ media: [path.join(ROOT, 'fixtures/media/clipB.mp4')], output, project: projectPath, preset: presetFile, presetOutput }) }; delete env.ELECTRON_RUN_AS_NODE;
   server = spawn(process.execPath, [path.join(ROOT, 'packages/mcp/dist/cli.js')], { cwd: ROOT, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); server.stderr.on('data', (d) => serverError += d);
   const rpc = new Rpc(server); await rpc.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'professional-electron-acceptance', version: '2' } }); server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  const tools = (await rpc.request('tools/list')).tools; assert.equal(tools.length, 94); check('real stdio handshake discovers 94 tools', { count: tools.length });
+  const tools = (await rpc.request('tools/list')).tools; assert.equal(tools.length, 102); check('real stdio handshake discovers 102 tools', { count: tools.length });
   await waitFor('owning bridge', async () => (await fetch('http://127.0.0.1:' + port + '/health')).ok);
   await rpc.call('project_create', { name: 'Framecraft · Launch Film', fps: 30, width: 640, height: 360 });
   gui = spawn(ELECTRON, [path.join(ROOT, 'packages/gui'), '--remote-debugging-port=' + debugPort, '--remote-debugging-address=127.0.0.1'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); gui.stdout.on('data', (d) => guiError += d); gui.stderr.on('data', (d) => guiError += d);
@@ -86,6 +86,11 @@ try {
   }
   const input = (selector, value, event = 'change') => cdp.evaluate('(()=>{const i=document.querySelector(' + JSON.stringify(selector) + ');i.value=' + JSON.stringify(String(value)) + ';i.dispatchEvent(new Event(' + JSON.stringify(event) + ',{bubbles:true}));})()');
   const keyboard = (key, extra = {}) => cdp.evaluate('document.body.dispatchEvent(new KeyboardEvent("keydown",' + JSON.stringify({ key, bubbles: true, ...extra }) + '))');
+  async function acceptProjectReplacement() {
+    await waitFor('guarded replacement prompt', () => cdp.evaluate(`document.querySelector('#protection-replace-dialog')?.open === true`));
+    await cdp.evaluate(`document.querySelector('#protection-replace-discard').click()`);
+    await waitFor('guarded replacement prompt closed', () => cdp.evaluate(`document.querySelector('#protection-replace-dialog')?.open !== true`));
+  }
   const initial = await waitFor('rendered owning project', async () => { const s = await read(); return s.name.includes('Framecraft') && s.revision >= 1 && s; }), loads = cdp.loads;
   check('professional workspace attaches to owning MCP project', { revision: initial.revision, programSize: initial.program });
   let final;
@@ -192,7 +197,7 @@ try {
   const openingTitle = (await rpc.call('title_add', { text: 'FreeMier Pro\nLaunch film', start: 0, end: 3, style: { fontSize: 26, x: .08, y: .88, align: 'left', verticalAlign: 'bottom', backgroundOpacity: .5, padding: 7 } })).title;
   await waitFor('MCP title receives rendered glyph preview', () => cdp.evaluate('document.querySelector("#preview-quality").textContent==="Shared CPU preview"&&document.querySelectorAll(".text-card[data-title-id]").length===1'));
   await click('#btn-save'); await waitFor('portable GUI save', async () => (await fs.stat(path.join(projectPath, 'project.json'))).size > 100); const saved = JSON.parse(await fs.readFile(path.join(projectPath, 'project.json'), 'utf8')); assert.ok(saved.media.find((m) => m.id === assetA.id).copied); assert.ok((await fs.stat(path.join(projectPath, 'media', saved.media.find((m) => m.id === assetA.id).path))).size > 1000);
-  await gesture(v1, 5.5); await click('#btn-delete'); await waitFor('edit after save', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 2); await fs.unlink(path.join(workspace, 'media', assetA.path)); await click('#btn-open'); await waitFor('GUI load restores saved sequence', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 3);
+  await gesture(v1, 5.5); await click('#btn-delete'); await waitFor('edit after save', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 2); await fs.unlink(path.join(workspace, 'media', assetA.path)); await click('#btn-open'); await acceptProjectReplacement(); await waitFor('GUI load restores saved sequence', async () => (await rpc.call('track_inspect', { trackId: v1 })).track.clips.length === 3);
   assert.ok(path.isAbsolute((await rpc.call('media_inspect', { assetId: assetA.id })).asset.path)); check('save/load packages copied media and restores owning store after original copy removal');
   assert.equal((await rpc.call('effect_preset_list')).presets.length, 2);
   assert.equal((await rpc.call('marker_list')).markers.length, 3); assert.ok((await read()).timeline.markerPixels > 20); check('markers survive portable save/load without extending the seven-second export');
@@ -205,7 +210,7 @@ try {
     await fs.writeFile(projectFile, JSON.stringify(invalid));
     const refusal = await rpc.request('tools/call', { name: 'project_load', arguments: { path: projectPath } });
     assert.equal(refusal.isError, true); assert.equal(JSON.parse(refusal.content[0].text).error.code, 'INVALID_ARGUMENT');
-    await click('#btn-open'); await waitFor('native invalid project error', async () => (await read()).toast.includes('Invalid project field'));
+    await click('#btn-open'); await acceptProjectReplacement(); await waitFor('native invalid project error', async () => (await read()).toast.includes('Invalid project field'));
     assert.deepEqual(await rpc.call('project_info'), protectedInfo);
     const current = await read(); assert.equal(current.name, protectedPaint.name); assert.equal(current.revision, protectedPaint.revision); assert.equal(current.origin, protectedPaint.origin); assert.ok(current.program.luma > 10);
     await click('#btn-undo'); await waitFor('GUI undo retained after failed load', async () => !(await rpc.call('marker_list')).markers.some((m) => m.id === historyMarker.id));
@@ -257,7 +262,7 @@ try {
   await input('#timecode-input', '00:00:03:00'); await input('#title-text', 'GUI created'); await click('#title-create'); await waitFor('GUI title creation changes content duration', async () => (await rpc.call('title_list')).titles.length === 2 && (await read()).timecode.endsWith(' / 00:00:05:05'));
   check('real title PNG preview, typed MCP/GUI CRUD, anchor movement, exclusive timing and undo');
   await click('#btn-save'); await waitFor('title portable save', async () => JSON.parse(await fs.readFile(path.join(projectPath, 'project.json'), 'utf8')).timeline.titles?.length === 2);
-  await rpc.call('title_remove', { titleId: title.id }); await click('#btn-open'); await waitFor('title portable load restores glyphs', async () => (await rpc.call('title_list')).titles.length === 2); await input('#timecode-input', '00:00:01:00'); await waitFor('loaded title glyphs', async () => (await glyphs()).green > 400);
+  await rpc.call('title_remove', { titleId: title.id }); await click('#btn-open'); await acceptProjectReplacement(); await waitFor('title portable load restores glyphs', async () => (await rpc.call('title_list')).titles.length === 2); await input('#timecode-input', '00:00:01:00'); await waitFor('loaded title glyphs', async () => (await glyphs()).green > 400);
   check('styled title persistence restores portable project and decoded preview');
   if (!screenshotOnly) {
     await click('#btn-export'); await waitFor('real title-only GUI export', async () => cdp.evaluate('!document.querySelector("#btn-export").disabled&&document.querySelector("#toast").textContent.startsWith("Exported")'), 120000);
@@ -283,7 +288,7 @@ try {
   check('MCP SRT import, actual caption preview pixels, GUI edit and lock enforcement');
   await click('#btn-save'); await waitFor('caption portable save', async () => JSON.parse(await fs.readFile(path.join(projectPath, 'project.json'), 'utf8')).timeline.captions?.name === 'Dialogue');
   await click('.caption-card[data-cue-id="' + cue.id + '"] button[title="Delete caption"]'); await waitFor('caption deletion paints black', async () => (await rpc.call('captions_list')).cues.length === 0 && (await read()).program.luma === 0);
-  await click('#btn-open'); await waitFor('caption reload restores exact authored cue', async () => (await rpc.call('captions_list')).cues[0]?.startMs === 503);
+  await click('#btn-open'); await acceptProjectReplacement(); await waitFor('caption reload restores exact authored cue', async () => (await rpc.call('captions_list')).cues[0]?.startMs === 503);
   await click('.caption-card[data-cue-id="' + cue.id + '"] button[title="Seek caption"]'); await waitFor('caption reload glyphs', async () => (await glyphs()).white > 100);
   if (!screenshotOnly) {
     await input('#caption-policy', 'sidecar'); await click('#btn-export'); await waitFor('native caption sidecar export', async () => cdp.evaluate('!document.querySelector("#btn-export").disabled&&document.querySelector("#toast").textContent.startsWith("Exported")'), 120000);

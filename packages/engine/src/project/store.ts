@@ -96,6 +96,7 @@ export class EditorStore {
   #state: EditorState;
   #history: SnapshotHistory<EditorState>;
   #listeners = new Set<ChangeListener>();
+  #loadGeneration = 0;
 
   constructor(project: Project, maxUndo = 200) {
     this.#state = { project: validateProject(project), revision: 0 };
@@ -116,6 +117,11 @@ export class EditorStore {
 
   get revision(): number {
     return this.#state.revision;
+  }
+
+  /** Monotonic signal for successful document replacements; undo never rewinds it. */
+  get loadGeneration(): number {
+    return this.#loadGeneration;
   }
 
   get canUndo(): boolean {
@@ -164,6 +170,7 @@ export class EditorStore {
     validateProject(project);
     this.#history.clear();
     this.#state = { project, revision: this.#state.revision + 1 };
+    this.#loadGeneration += 1;
     this.#emit({ revision: this.#state.revision, kind: 'project', ids: [project.id], state: this.#state });
   }
 
