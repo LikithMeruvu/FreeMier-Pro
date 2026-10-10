@@ -30,12 +30,26 @@ export function projectDir(projectPath: string): string {
 
 interface FileIdentity { readonly dev: number; readonly ino: number }
 
+interface TemporaryFileIdentity extends FileIdentity { readonly size: number; readonly mtimeMs: number }
+
 function ioPathError(message: string, target: string): EditorError {
   return new EditorError('IO_ERROR', message, { path: target });
 }
 
 function sameIdentity(stat: { readonly dev: number; readonly ino: number }, identity: FileIdentity): boolean {
   return stat.dev === identity.dev && stat.ino === identity.ino;
+}
+
+/**
+ * A freed inode can be reused immediately (common on Linux), so dev+ino alone
+ * cannot prove cleanup still owns its temporary file. Size and modification
+ * time are captured after the payload is written and must also match.
+ */
+function sameTemporaryIdentity(
+  stat: { readonly dev: number; readonly ino: number; readonly size: number; readonly mtimeMs: number },
+  identity: TemporaryFileIdentity,
+): boolean {
+  return sameIdentity(stat, identity) && stat.size === identity.size && stat.mtimeMs === identity.mtimeMs;
 }
 
 /** Create ordinary directories one component at a time and retain their identities for publication checks. */
@@ -104,20 +118,20 @@ export async function saveProject(project: Project, projectPath: string): Promis
   const targetIdentity = await captureTargetIdentity(target);
   const tmp = `${target}.tmp-${randomUUID()}`;
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-  let createdIdentity: FileIdentity | undefined;
+  let createdIdentity: TemporaryFileIdentity | undefined;
   let published = false;
   try {
     handle = await fs.open(tmp, 'wx', 0o600);
-    const createdStat = await handle.stat();
-    createdIdentity = { dev: createdStat.dev, ino: createdStat.ino };
     await handle.writeFile(payload, 'utf8');
     await handle.sync();
+    const writtenStat = await handle.stat();
+    createdIdentity = { dev: writtenStat.dev, ino: writtenStat.ino, size: writtenStat.size, mtimeMs: writtenStat.mtimeMs };
     await handle.close();
     handle = undefined;
     await assertDirectoryIdentities(directoryIdentities);
     await assertTargetIdentity(target, targetIdentity);
     const tempStat = await fs.lstat(tmp);
-    if (!tempStat.isFile() || tempStat.isSymbolicLink() || tempStat.nlink !== 1 || !sameIdentity(tempStat, createdIdentity)) throw ioPathError('Temporary project file changed during save', tmp);
+    if (!tempStat.isFile() || tempStat.isSymbolicLink() || tempStat.nlink !== 1 || !sameTemporaryIdentity(tempStat, createdIdentity)) throw ioPathError('Temporary project file changed during save', tmp);
     await fs.rename(tmp, target); // atomic on the same volume
     published = true;
   } finally {
@@ -126,7 +140,7 @@ export async function saveProject(project: Project, projectPath: string): Promis
       try {
         await assertDirectoryIdentities(directoryIdentities);
         const current = await fs.lstat(tmp);
-        if (current.isFile() && !current.isSymbolicLink() && current.nlink === 1 && sameIdentity(current, createdIdentity)) await fs.unlink(tmp);
+        if (current.isFile() && !current.isSymbolicLink() && current.nlink === 1 && sameTemporaryIdentity(current, createdIdentity)) await fs.unlink(tmp);
       } catch { /* Only the exact regular file created here is eligible for cleanup. */ }
     }
   }
